@@ -33,8 +33,14 @@ export async function gw<T = unknown>(
   if (!res.ok) {
     const text = await res.text();
     console.error(`Gateway ${connector} ${path} falhou [${res.status}]: ${text}`);
+    if (res.status === 429) {
+      throw new Error(
+        "Limite de requisições do Google atingido momentaneamente. Aguarde alguns instantes e clique em Atualizar.",
+      );
+    }
     throw new Error(`Google API [${res.status}]: ${text.slice(0, 400)}`);
   }
+
   return (await res.json()) as T;
 }
 
