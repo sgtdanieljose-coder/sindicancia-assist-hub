@@ -41,8 +41,15 @@ function Documentos() {
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
+          {selecionada?.pastaUrl && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={selecionada.pastaUrl} target="_blank" rel="noreferrer">
+                <FolderOpen className="size-4" /> Pasta da sindicância
+              </a>
+            </Button>
+          )}
           <Button variant="outline" size="sm" asChild>
-            <a href={PASTA_DRIVE} target="_blank" rel="noreferrer">
+            <a href={selecionada?.anexosUrl || PASTA_DRIVE} target="_blank" rel="noreferrer">
               <FolderOpen className="size-4" /> Pasta de anexos
             </a>
           </Button>
