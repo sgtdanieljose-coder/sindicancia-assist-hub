@@ -30,11 +30,11 @@ export const Route = createFileRoute("/")({
         content:
           "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
       },
-      { property: "og:title", content: "Painel de Sindicâncias — Exército Brasileiro" },
+      { property: "og:title", content: "Painel de Sindicâncias | Gestão do Encarregado — EB" },
       {
         property: "og:description",
         content:
-          "Gestão de sindicâncias conforme a Portaria C Ex nr 2.394/2024, integrada ao Google Sheets e Google Docs.",
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
       },
     ],
   }),
