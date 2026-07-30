@@ -12,6 +12,12 @@ export type Sindicancia = {
   etapas: string[];
   documentos: { titulo: string; documentId: string; url: string }[];
   atualizadoEm: string;
+  /** Pasta da sindicância no Drive (nome = NUP), criada automaticamente ao salvar. */
+  pastaId?: string;
+  pastaUrl?: string;
+  /** Subpasta "Anexos" dentro da pasta da sindicância. */
+  anexosId?: string;
+  anexosUrl?: string;
 };
 
 export const ETAPAS = [
