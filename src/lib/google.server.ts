@@ -62,7 +62,25 @@ export const HEADERS = [
   "etapas",
   "documentos",
   "atualizado_em",
+  "pasta_id",
+  "pasta_url",
+  "anexos_id",
+  "anexos_url",
 ];
+
+/** Converte um índice de coluna 1-based em letra de coluna do Sheets (1 -> A, 17 -> Q, 27 -> AA...). */
+function columnLetter(index: number): string {
+  let n = index;
+  let letra = "";
+  while (n > 0) {
+    const resto = (n - 1) % 26;
+    letra = String.fromCharCode(65 + resto) + letra;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letra;
+}
+
+const ULTIMA_COLUNA = columnLetter(HEADERS.length);
 
 export async function ensureTab() {
   const meta = await gw<{ sheets: { properties: { title: string } }[] }>(
@@ -71,43 +89,67 @@ export async function ensureTab() {
     { query: { fields: "sheets.properties.title" } },
   );
   const exists = meta.sheets?.some((s) => s.properties.title === SHEET_TAB);
-  if (exists) return;
 
-  await gw("google_sheets", `/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`, {
-    method: "POST",
-    body: { requests: [{ addSheet: { properties: { title: SHEET_TAB } } }] },
-  });
-  await gw(
+  if (!exists) {
+    await gw("google_sheets", `/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`, {
+      method: "POST",
+      body: { requests: [{ addSheet: { properties: { title: SHEET_TAB } } }] },
+    });
+    await gw(
+      "google_sheets",
+      `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A1:${ULTIMA_COLUNA}1`,
+      {
+        method: "PUT",
+        query: { valueInputOption: "RAW" },
+        body: { values: [HEADERS] },
+      },
+    );
+    return;
+  }
+
+  // Migração: se a aba já existia antes das colunas de pasta do Drive serem adicionadas,
+  // garante que o cabeçalho seja atualizado sem tocar nas linhas de dados existentes.
+  const cabecalhoAtual = await gw<{ values?: string[][] }>(
     "google_sheets",
-    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A1:M1`,
-    {
-      method: "PUT",
-      query: { valueInputOption: "RAW" },
-      body: { values: [HEADERS] },
-    },
+    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A1:${ULTIMA_COLUNA}1`,
   );
+  if ((cabecalhoAtual.values?.[0]?.length ?? 0) < HEADERS.length) {
+    await gw(
+      "google_sheets",
+      `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A1:${ULTIMA_COLUNA}1`,
+      {
+        method: "PUT",
+        query: { valueInputOption: "RAW" },
+        body: { values: [HEADERS] },
+      },
+    );
+  }
 }
 
 export async function readRows(): Promise<string[][]> {
   await ensureTab();
   const data = await gw<{ values?: string[][] }>(
     "google_sheets",
-    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A2:M1000`,
+    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A2:${ULTIMA_COLUNA}1000`,
   );
   return (data.values ?? []).filter((r) => r[0]);
 }
 
 export async function appendRow(row: string[]) {
   await ensureTab();
-  await gw("google_sheets", `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A:M:append`, {
-    method: "POST",
-    query: { valueInputOption: "USER_ENTERED", insertDataOption: "INSERT_ROWS" },
-    body: { values: [row] },
-  });
+  await gw(
+    "google_sheets",
+    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_TAB}!A:${ULTIMA_COLUNA}:append`,
+    {
+      method: "POST",
+      query: { valueInputOption: "USER_ENTERED", insertDataOption: "INSERT_ROWS" },
+      body: { values: [row] },
+    },
+  );
 }
 
 export async function updateRow(rowIndex: number, row: string[]) {
-  const a1 = `${SHEET_TAB}!A${rowIndex}:M${rowIndex}`;
+  const a1 = `${SHEET_TAB}!A${rowIndex}:${ULTIMA_COLUNA}${rowIndex}`;
   await gw("google_sheets", `/v4/spreadsheets/${SPREADSHEET_ID}/values/${a1}`, {
     method: "PUT",
     query: { valueInputOption: "USER_ENTERED" },
@@ -115,8 +157,65 @@ export async function updateRow(rowIndex: number, row: string[]) {
   });
 }
 
+/** Busca uma subpasta pelo nome dentro de um pai; cria se não existir. Idempotente. */
+async function obterOuCriarPasta(
+  nome: string,
+  paiId: string,
+): Promise<{ id: string; url: string }> {
+  const nomeEscapado = nome.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const busca = await gw<{ files?: { id: string; name: string }[] }>(
+    "google_drive",
+    "/drive/v3/files",
+    {
+      query: {
+        q: `name = '${nomeEscapado}' and mimeType = 'application/vnd.google-apps.folder' and '${paiId}' in parents and trashed = false`,
+        fields: "files(id,name)",
+        spaces: "drive",
+      },
+    },
+  );
+
+  const existente = busca.files?.[0];
+  if (existente) {
+    return { id: existente.id, url: `https://drive.google.com/drive/folders/${existente.id}` };
+  }
+
+  const criada = await gw<{ id: string }>("google_drive", "/drive/v3/files", {
+    method: "POST",
+    query: { fields: "id" },
+    body: {
+      name: nome,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [paiId],
+    },
+  });
+
+  return { id: criada.id, url: `https://drive.google.com/drive/folders/${criada.id}` };
+}
+
+/**
+ * Garante a estrutura de pastas de uma sindicância no Drive: <PASTA BASE>/<NUP>/Anexos.
+ * Idempotente — se as pastas já existirem (mesmo nome, mesmo pai), reaproveita em vez de duplicar.
+ */
+export async function ensureSindicanciaFolders(nup: string) {
+  const nome = nup.trim();
+  if (!nome) {
+    throw new Error("NUP vazio: não é possível criar a pasta da sindicância no Drive.");
+  }
+
+  const pasta = await obterOuCriarPasta(nome, DRIVE_FOLDER_ID);
+  const anexos = await obterOuCriarPasta("Anexos", pasta.id);
+
+  return {
+    pastaId: pasta.id,
+    pastaUrl: pasta.url,
+    anexosId: anexos.id,
+    anexosUrl: anexos.url,
+  };
+}
+
 /** Cria um Google Doc com o texto informado e devolve id/url. */
-export async function createDoc(title: string, content: string) {
+export async function createDoc(title: string, content: string, pastaId?: string) {
   const doc = await gw<{ documentId: string }>("google_docs", "/v1/documents", {
     method: "POST",
     body: { title },
@@ -129,11 +228,11 @@ export async function createDoc(title: string, content: string) {
     },
   });
 
-  // Tenta arquivar na pasta de anexos do usuário (best-effort).
+  // Tenta arquivar na pasta da sindicância (ou na pasta geral, se ela ainda não tiver uma). Best-effort.
   try {
     await gw("google_drive", `/drive/v3/files/${doc.documentId}`, {
       method: "PATCH",
-      query: { addParents: DRIVE_FOLDER_ID, fields: "id,parents" },
+      query: { addParents: pastaId || DRIVE_FOLDER_ID, fields: "id,parents" },
       body: {},
     });
   } catch (e) {
