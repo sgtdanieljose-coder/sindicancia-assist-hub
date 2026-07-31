@@ -62,8 +62,15 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     }) => data,
   )
   .handler(async ({ data }) => {
-    const { createDoc, updateDocContent, updateRow, ensureAutosDoc, rebuildAutos, getDocText } =
-      await import("./google.server");
+    const {
+      createDoc,
+      updateDocContent,
+      updateRow,
+      ensureAutosDoc,
+      rebuildAutos,
+      getDocText,
+      formatarCapaAutos,
+    } = await import("./google.server");
 
     const { atual, linha } = await carregar(data.sindicanciaId);
 
@@ -96,6 +103,15 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       });
     }
     atual.documentos = lista;
+
+    // Formatação especial (negrito/centralização/sublinhado) da Capa dos Autos.
+    if (data.pecaId === "autos") {
+      try {
+        await formatarCapaAutos(doc.documentId);
+      } catch (e) {
+        console.warn("Falha ao formatar a Capa dos Autos:", e);
+      }
+    }
 
     // Marca automaticamente a etapa correspondente no checklist, se ainda não estiver marcada.
     if (data.etapa && !atual.etapas.includes(data.etapa)) {
