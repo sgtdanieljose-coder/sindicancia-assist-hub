@@ -34,6 +34,7 @@ export function rowToSindicancia(row: string[]): Sindicancia {
     autosDocId: row[20] || undefined,
     autosUrl: row[21] || undefined,
     juntadas: safeParse<Juntada[]>(row[22], []),
+    prazoProrrogadoDias: row[23] ? Number(row[23]) || 0 : 0,
   };
 }
 
@@ -62,6 +63,6 @@ export function sindicanciaToRow(s: Sindicancia): string[] {
     s.autosDocId ?? "",
     s.autosUrl ?? "",
     JSON.stringify(s.juntadas ?? []),
+    String(s.prazoProrrogadoDias ?? 0),
   ];
 }
-
