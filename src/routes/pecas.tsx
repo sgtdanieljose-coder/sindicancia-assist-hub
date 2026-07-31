@@ -45,6 +45,7 @@ const camposVazios: PecaCampos = {
   respostas: "",
   justificativa: "",
   prazoDias: "",
+  numeroOficio: "",
 };
 
 function Pecas() {
@@ -61,7 +62,17 @@ function Pecas() {
   useEffect(() => setTexto(gerado), [gerado]);
 
   const set = (k: keyof PecaCampos, v: string) => setCampos((c) => ({ ...c, [k]: v }));
-  const nome = PECAS.find((p) => p.id === peca)?.nome ?? "Peça";
+  const pecaAtual = PECAS.find((p) => p.id === peca);
+  const nome = pecaAtual?.nome ?? "Peça";
+  const unica = pecaAtual?.unica ?? false;
+  const etapa = pecaAtual?.etapa;
+
+  // Sugere o próximo número de ofício com base em quantos já foram exportados nesta sindicância.
+  useEffect(() => {
+    if (peca !== "oficio" || !selecionada) return;
+    const proximo = (selecionada.documentos ?? []).filter((d) => d.pecaId === "oficio").length + 1;
+    setCampos((c) => (c.numeroOficio ? c : { ...c, numeroOficio: String(proximo) }));
+  }, [peca, selecionada]);
 
   if (!selecionada) {
     return (
@@ -135,6 +146,17 @@ function Pecas() {
                 onChange={(e) => set("hora", e.target.value)}
               />
             </div>
+
+            {peca === "oficio" && (
+              <div className="space-y-1.5">
+                <Label>Número do Ofício</Label>
+                <Input
+                  value={campos.numeroOficio}
+                  onChange={(e) => set("numeroOficio", e.target.value)}
+                  placeholder="Sugerido automaticamente; ajuste se necessário"
+                />
+              </div>
+            )}
 
             {(peca === "inquiricao" || peca === "oficio") && (
               <div className="space-y-1.5">
@@ -218,6 +240,9 @@ function Pecas() {
             conteudo={texto}
             sindicanciaId={selecionada.id}
             pecasExistentes={selecionada.documentos ?? []}
+            pecaId={peca}
+            unica={unica}
+            etapa={etapa}
             onChange={setTexto}
             onExportado={recarregar}
           />
