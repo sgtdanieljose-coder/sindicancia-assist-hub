@@ -24,7 +24,7 @@ export type Sindicancia = {
   objeto: string;
   status: string;
   etapas: string[];
-  documentos: { titulo: string; documentId: string; url: string }[];
+  documentos: { titulo: string; documentId: string; url: string; pecaId?: string }[];
   atualizadoEm: string;
   /** Pasta da sindicância no Drive (nome = NUP), criada automaticamente ao salvar. */
   pastaId?: string;
@@ -43,7 +43,17 @@ export type Sindicancia = {
   autosUrl?: string;
   /** Juntadas do processo, cada uma com seus anexos vinculados ao NUP. */
   juntadas: Juntada[];
+  /** Dias adicionais concedidos por prorrogação (somados aos 30 dias corridos regulamentares). */
+  prazoProrrogadoDias?: number;
 };
+
+export const PRAZO_BASE_DIAS = 30;
+export const PRAZO_ALERTA_ANTECEDENCIA_DIAS = 10;
+
+/** Prazo total (dias corridos), somando eventual prorrogação já registrada. */
+export function prazoTotalDias(s: Pick<Sindicancia, "prazoProrrogadoDias">): number {
+  return PRAZO_BASE_DIAS + (s.prazoProrrogadoDias || 0);
+}
 
 export const ETAPAS = [
   "Recebimento da Portaria de instauração",
@@ -69,16 +79,56 @@ export const STATUS = [
 ] as const;
 
 export const PECAS = [
-  { id: "autos", nome: "Autos de Sindicância (Capa)" },
-  { id: "abertura", nome: "Termo de Abertura dos Trabalhos" },
-  { id: "notificacao", nome: "Notificação Prévia do Sindicado" },
-  { id: "inquiricao", nome: "Termo de Inquirição de Testemunha" },
-  { id: "depoimento", nome: "Termo de Depoimento do Sindicado" },
-  { id: "oficio", nome: "Ofício / Mandado de Intimação" },
-  { id: "juntada", nome: "Juntada de Documentos" },
-  { id: "encerramento", nome: "Termo de Encerramento da Instrução" },
-  { id: "alegacoes", nome: "Notificação para Alegações Finais" },
-  { id: "prorrogacao", nome: "Pedido de Prorrogação de Prazo" },
+  {
+    id: "autos",
+    nome: "Autos de Sindicância (Capa)",
+    unica: true,
+    etapa: "Autuação (Capa dos Autos de Sindicância)",
+  },
+  {
+    id: "abertura",
+    nome: "Termo de Abertura dos Trabalhos",
+    unica: true,
+    etapa: "Termo de Abertura dos Trabalhos",
+  },
+  {
+    id: "notificacao",
+    nome: "Notificação Prévia do Sindicado",
+    unica: true,
+    etapa: "Notificação prévia do sindicado",
+  },
+  {
+    id: "inquiricao",
+    nome: "Termo de Inquirição de Testemunha",
+    unica: false,
+    etapa: "Inquirição de testemunhas",
+  },
+  {
+    id: "depoimento",
+    nome: "Termo de Depoimento do Sindicado",
+    unica: true,
+    etapa: "Depoimento do sindicado",
+  },
+  { id: "oficio", nome: "Ofício / Mandado de Intimação", unica: false, etapa: undefined },
+  {
+    id: "juntada",
+    nome: "Juntada de Documentos",
+    unica: false,
+    etapa: "Juntada de documentos",
+  },
+  {
+    id: "encerramento",
+    nome: "Termo de Encerramento da Instrução",
+    unica: true,
+    etapa: "Encerramento da instrução",
+  },
+  {
+    id: "alegacoes",
+    nome: "Notificação para Alegações Finais",
+    unica: true,
+    etapa: "Alegações finais",
+  },
+  { id: "prorrogacao", nome: "Pedido de Prorrogação de Prazo", unica: false, etapa: undefined },
 ] as const;
 
 export type PecaId = (typeof PECAS)[number]["id"];
@@ -94,6 +144,7 @@ export type PecaCampos = {
   respostas: string;
   justificativa: string;
   prazoDias: string;
+  numeroOficio: string;
 };
 
 export function diasCorridos(dataInicio: string) {
@@ -217,9 +268,13 @@ function subcabecalhoProcesso(s: Sindicancia) {
 }
 
 function assinatura(s: Sindicancia) {
-  return ["", "", (s.sindicante || "Posto/Grad e Nome de Guerra").toUpperCase(), "Sindicante", ""].join(
-    "\n",
-  );
+  return [
+    "",
+    "",
+    (s.sindicante || "Posto/Grad e Nome de Guerra").toUpperCase(),
+    "Sindicante",
+    "",
+  ].join("\n");
 }
 
 export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
@@ -262,7 +317,10 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
             .split("\n")
             .map((d) => d.trim())
             .filter(Boolean)
-            .map((d, i, arr) => `${i + 1}. ${d.replace(/[.;]$/, "")}${i === arr.length - 1 ? "." : ";"}`)
+            .map(
+              (d, i, arr) =>
+                `${i + 1}. ${d.replace(/[.;]$/, "")}${i === arr.length - 1 ? "." : ";"}`,
+            )
             .join("\n\n"),
         ].join("\n");
 
@@ -321,7 +379,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
       case "oficio":
         return [
           subcabecalhoProcesso(s),
-          `Ofício nr ____ - Sind ${s.nup || ""}`,
+          `Ofício nr ${c.numeroOficio || "____"} - Sind ${s.nup || ""}`,
           "",
           `Ao Senhor ${c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade"}`,
           `${c.qualificacao || "Função / Endereço"}`,
