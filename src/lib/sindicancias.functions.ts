@@ -45,30 +45,64 @@ export const salvarSindicancia = createServerFn({ method: "POST" })
   });
 
 /**
- * Exporta a peça: cria um Google Doc individual e insere a peça no documento único
- * dos autos, na página (posição) escolhida pelo usuário.
+ * Exporta a peça: cria (ou, se for peça "única" já exportada antes, atualiza) o documento
+ * individual e reinsere a peça no documento único dos autos, mantendo a posição já escolhida
+ * quando for uma atualização.
  */
 export const exportarParaDocs = createServerFn({ method: "POST" })
   .inputValidator(
-    (data: { sindicanciaId: string; titulo: string; conteudo: string; posicao?: number }) => data,
+    (data: {
+      sindicanciaId: string;
+      titulo: string;
+      conteudo: string;
+      posicao?: number;
+      pecaId?: string;
+      unica?: boolean;
+      etapa?: string;
+    }) => data,
   )
   .handler(async ({ data }) => {
-    const { createDoc, updateRow, ensureAutosDoc, rebuildAutos, getDocText } =
+    const { createDoc, updateDocContent, updateRow, ensureAutosDoc, rebuildAutos, getDocText } =
       await import("./google.server");
 
     const { atual, linha } = await carregar(data.sindicanciaId);
 
-    // 1) Documento individual da peça.
-    const doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
+    // Peça "única" (ex.: Termo de Abertura) já exportada antes? Atualiza o mesmo documento,
+    // na mesma posição, em vez de criar mais um Google Doc duplicado.
+    const existente =
+      data.unica && data.pecaId
+        ? atual.documentos.find((d) => d.pecaId === data.pecaId)
+        : undefined;
 
-    // 2) Posição desejada dentro dos autos (1-based).
-    const lista = [...atual.documentos];
-    const total = lista.length + 1;
-    const pos = Math.min(Math.max(data.posicao ?? total, 1), total);
-    lista.splice(pos - 1, 0, { titulo: data.titulo, documentId: doc.documentId, url: doc.url });
+    let lista = [...atual.documentos];
+    let doc: { documentId: string; url: string; embedUrl: string };
+    let pos: number;
+
+    if (existente) {
+      doc = await updateDocContent(existente.documentId, data.conteudo);
+      pos = lista.findIndex((d) => d.documentId === existente.documentId) + 1;
+      lista = lista.map((d) =>
+        d.documentId === existente.documentId ? { ...d, titulo: data.titulo } : d,
+      );
+    } else {
+      doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
+      const total = lista.length + 1;
+      pos = Math.min(Math.max(data.posicao ?? total, 1), total);
+      lista.splice(pos - 1, 0, {
+        titulo: data.titulo,
+        documentId: doc.documentId,
+        url: doc.url,
+        pecaId: data.pecaId,
+      });
+    }
     atual.documentos = lista;
 
-    // 3) Documento único paginado.
+    // Marca automaticamente a etapa correspondente no checklist, se ainda não estiver marcada.
+    if (data.etapa && !atual.etapas.includes(data.etapa)) {
+      atual.etapas = [...atual.etapas, data.etapa];
+    }
+
+    // Documento único paginado.
     let autosUrl = atual.autosUrl;
     try {
       const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
@@ -95,7 +129,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       console.warn("Falha ao registrar documento na planilha:", e);
     }
 
-    return { ...doc, posicao: pos, autosUrl };
+    return { ...doc, posicao: pos, autosUrl, atualizado: Boolean(existente) };
   });
 
 /** Cria uma nova juntada (numerada) vinculada ao NUP da sindicância. */
