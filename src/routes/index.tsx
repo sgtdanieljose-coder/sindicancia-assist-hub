@@ -239,11 +239,17 @@ function Dashboard() {
               value={form.local}
               onChange={(v) => set("local", v)}
             />
-            <Campo
-              label="Subordinação"
-              value={form.subordinacao}
-              onChange={(v) => set("subordinacao", v)}
-            />
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label>Subordinação (timbre — uma linha por linha do cabeçalho)</Label>
+              <Textarea
+                value={form.subordinacao}
+                onChange={(e) => set("subordinacao", e.target.value)}
+                placeholder={
+                  "63º Batalhão de Infantaria\n(Regimento do Moura / 1767)\nBatalhão Fernando Machado"
+                }
+                className="min-h-20 font-mono text-sm"
+              />
+            </div>
             <Campo
               label="Organização Militar (OM)"
               value={form.om}
