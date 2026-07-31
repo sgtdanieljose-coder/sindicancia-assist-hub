@@ -55,7 +55,12 @@ const vazia: Sindicancia = {
   etapas: [],
   documentos: [],
   atualizadoEm: "",
+  local: "",
+  subordinacao: "",
+  omInstauradora: "",
+  juntadas: [],
 };
+
 
 function Dashboard() {
   const { itens, erro, carregando, selecionada, setSelecionadaId, recarregar } = useSindicancias();
