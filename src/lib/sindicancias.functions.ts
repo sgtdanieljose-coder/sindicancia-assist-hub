@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { Juntada, Sindicancia } from "./pecas";
-import { sindicanciaToRow } from "./sindicancias.mapper";
+import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
 import { carregar } from "./sindicancias.server";
 
 export const listarSindicancias = createServerFn({ method: "GET" }).handler(async () => {
