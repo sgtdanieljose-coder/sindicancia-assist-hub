@@ -249,13 +249,12 @@ const linha = "_".repeat(66);
 
 /** Cabeçalho institucional obrigatório — o brasão é inserido como imagem acima destas linhas. */
 export function cabecalho(s: Sindicancia) {
-  return [
-    "MINISTÉRIO DA DEFESA",
-    "EXÉRCITO BRASILEIRO",
-    (s.subordinacao || "SUBORDINAÇÃO").toUpperCase(),
-    (s.om || "ORGANIZAÇÃO MILITAR").toUpperCase(),
-    "",
-  ].join("\n");
+  const linhasSubordinacao = (s.subordinacao || "SUBORDINAÇÃO")
+    .toUpperCase()
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return ["MINISTÉRIO DA DEFESA", "EXÉRCITO BRASILEIRO", ...linhasSubordinacao, ""].join("\n");
 }
 
 function subcabecalhoProcesso(s: Sindicancia) {
@@ -283,7 +282,11 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
   if (peca === "autos") {
     return [
-      head,
+      head.replace(/\n+$/, ""),
+      "",
+      "",
+      "",
+      "",
       "AUTOS DE SINDICÂNCIA",
       "",
       "",
