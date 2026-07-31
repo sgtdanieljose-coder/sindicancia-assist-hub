@@ -320,6 +320,8 @@ export async function createDoc(title: string, content: string, pastaId?: string
 }
 
 type DocElement = {
+  startIndex?: number;
+  endIndex?: number;
   paragraph?: { elements?: { textRun?: { content?: string } }[] };
 };
 
@@ -339,6 +341,107 @@ export async function getDocText(documentId: string): Promise<string> {
     .join("")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+type Paragrafo = { startIndex: number; endIndex: number; texto: string };
+
+async function listarParagrafos(documentId: string): Promise<Paragrafo[]> {
+  const doc = await gw<{ body?: { content?: DocElement[] } }>(
+    "google_docs",
+    `/v1/documents/${documentId}`,
+  );
+  const paragrafos: Paragrafo[] = [];
+  for (const el of doc.body?.content ?? []) {
+    if (!el.paragraph || el.startIndex === undefined || el.endIndex === undefined) continue;
+    const texto = (el.paragraph.elements ?? []).map((e) => e.textRun?.content ?? "").join("");
+    paragrafos.push({ startIndex: el.startIndex, endIndex: el.endIndex, texto });
+  }
+  return paragrafos;
+}
+
+const ROTULOS_CAPA = ["NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:"];
+
+/**
+ * Formata a Capa dos Autos de Sindicância já exportada: cabeçalho institucional em negrito e
+ * centralizado, título "AUTOS DE SINDICÂNCIA" em negrito, sublinhado e centralizado, e os
+ * rótulos NUP/SINDICANTE/SINDICADO/OBJETO em negrito (mantendo o valor em texto normal).
+ * Reconhece os trechos pelo padrão do texto já inserido — funciona mesmo se o usuário tiver
+ * ajustado palavras no meio do caminho, desde que o título e os rótulos permaneçam intactos.
+ */
+export async function formatarCapaAutos(documentId: string) {
+  const paragrafos = await listarParagrafos(documentId);
+  const requests: unknown[] = [];
+  let noCabecalho = true;
+
+  for (const p of paragrafos) {
+    const texto = p.texto.replace(/\n$/, "");
+    const conteudo = texto.trim();
+    if (!conteudo) continue;
+
+    const inicio = p.startIndex;
+    const fim = p.startIndex + texto.length;
+
+    if (conteudo === "AUTOS DE SINDICÂNCIA") {
+      noCabecalho = false;
+      requests.push(
+        {
+          updateTextStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            textStyle: { bold: true, underline: true },
+            fields: "bold,underline",
+          },
+        },
+        {
+          updateParagraphStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            paragraphStyle: { alignment: "CENTER" },
+            fields: "alignment",
+          },
+        },
+      );
+      continue;
+    }
+
+    if (noCabecalho) {
+      requests.push(
+        {
+          updateTextStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            textStyle: { bold: true },
+            fields: "bold",
+          },
+        },
+        {
+          updateParagraphStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            paragraphStyle: { alignment: "CENTER" },
+            fields: "alignment",
+          },
+        },
+      );
+      continue;
+    }
+
+    const rotulo = ROTULOS_CAPA.find((r) => conteudo.startsWith(r));
+    if (rotulo) {
+      const recuo = texto.length - texto.trimStart().length;
+      const inicioRotulo = inicio + recuo;
+      requests.push({
+        updateTextStyle: {
+          range: { startIndex: inicioRotulo, endIndex: inicioRotulo + rotulo.length },
+          textStyle: { bold: true },
+          fields: "bold",
+        },
+      });
+    }
+  }
+
+  if (requests.length) {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests },
+    });
+  }
 }
 
 /**
