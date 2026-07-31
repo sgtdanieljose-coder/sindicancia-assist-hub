@@ -118,6 +118,9 @@ function RelatorioPage() {
             conteudo={texto}
             sindicanciaId={selecionada.id}
             pecasExistentes={selecionada.documentos ?? []}
+            pecaId="relatorio"
+            unica
+            etapa="Relatório do Sindicante"
             onChange={setTexto}
             onExportado={recarregar}
           />
