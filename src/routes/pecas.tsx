@@ -217,6 +217,7 @@ function Pecas() {
             titulo={`${nome} — ${selecionada.nup || selecionada.id}`}
             conteudo={texto}
             sindicanciaId={selecionada.id}
+            pecasExistentes={selecionada.documentos ?? []}
             onChange={setTexto}
             onExportado={recarregar}
           />
