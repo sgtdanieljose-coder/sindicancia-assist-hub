@@ -254,7 +254,39 @@ export async function ensureSindicanciaFolders(nup: string) {
   };
 }
 
-/** Cria um Google Doc com o texto informado e devolve id/url. */
+/** Insere o brasão da República centralizado no início do documento (best-effort). */
+async function inserirBrasao(documentId: string, index = 1) {
+  try {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: {
+        requests: [
+          {
+            insertInlineImage: {
+              location: { index },
+              uri: BRASAO_URL,
+              objectSize: {
+                height: { magnitude: 70, unit: "PT" },
+                width: { magnitude: 62, unit: "PT" },
+              },
+            },
+          },
+          {
+            updateParagraphStyle: {
+              range: { startIndex: index, endIndex: index + 1 },
+              paragraphStyle: { alignment: "CENTER" },
+              fields: "alignment",
+            },
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    console.warn("Não foi possível inserir o brasão no documento:", e);
+  }
+}
+
+/** Cria um Google Doc com brasão + texto e devolve id/url. */
 export async function createDoc(title: string, content: string, pastaId?: string) {
   const doc = await gw<{ documentId: string }>("google_docs", "/v1/documents", {
     method: "POST",
@@ -264,9 +296,10 @@ export async function createDoc(title: string, content: string, pastaId?: string
   await gw("google_docs", `/v1/documents/${doc.documentId}:batchUpdate`, {
     method: "POST",
     body: {
-      requests: [{ insertText: { location: { index: 1 }, text: content } }],
+      requests: [{ insertText: { location: { index: 1 }, text: `\n${content}` } }],
     },
   });
+  await inserirBrasao(doc.documentId, 1);
 
   // Tenta arquivar na pasta da sindicância (ou na pasta geral, se ela ainda não tiver uma). Best-effort.
   try {
@@ -285,3 +318,128 @@ export async function createDoc(title: string, content: string, pastaId?: string
     embedUrl: `https://docs.google.com/document/d/${doc.documentId}/preview`,
   };
 }
+
+type DocElement = {
+  paragraph?: { elements?: { textRun?: { content?: string } }[] };
+};
+
+/** Extrai o texto puro de um Google Doc. */
+export async function getDocText(documentId: string): Promise<string> {
+  const doc = await gw<{ body?: { content?: DocElement[] } }>(
+    "google_docs",
+    `/v1/documents/${documentId}`,
+  );
+  const partes: string[] = [];
+  for (const el of doc.body?.content ?? []) {
+    for (const e of el.paragraph?.elements ?? []) {
+      if (e.textRun?.content) partes.push(e.textRun.content);
+    }
+  }
+  return partes.join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Cria (se necessário) o documento único dos autos e devolve seus dados. */
+export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?: string) {
+  if (autosDocId) {
+    return {
+      documentId: autosDocId,
+      url: `https://docs.google.com/document/d/${autosDocId}/edit`,
+    };
+  }
+  const doc = await gw<{ documentId: string }>("google_docs", "/v1/documents", {
+    method: "POST",
+    body: { title: `AUTOS DE SINDICÂNCIA — ${nup || "sem NUP"}` },
+  });
+  try {
+    await gw("google_drive", `/drive/v3/files/${doc.documentId}`, {
+      method: "PATCH",
+      query: { addParents: pastaId || DRIVE_FOLDER_ID, fields: "id,parents" },
+      body: {},
+    });
+  } catch (e) {
+    console.warn("Não foi possível mover os autos para a pasta do Drive:", e);
+  }
+  return {
+    documentId: doc.documentId,
+    url: `https://docs.google.com/document/d/${doc.documentId}/edit`,
+  };
+}
+
+/**
+ * Reescreve o documento único dos autos com as peças na ordem informada,
+ * numerando as folhas ("Fls. N") e separando cada peça por quebra de página.
+ */
+export async function rebuildAutos(documentId: string, pecas: { titulo: string; texto: string }[]) {
+  // 1) Limpa o conteúdo atual.
+  const atual = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
+    "google_docs",
+    `/v1/documents/${documentId}`,
+  );
+  const conteudo = atual.body?.content ?? [];
+  const fim = conteudo[conteudo.length - 1]?.endIndex ?? 2;
+  if (fim > 2) {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: {
+        requests: [{ deleteContentRange: { range: { startIndex: 1, endIndex: fim - 1 } } }],
+      },
+    });
+  }
+
+  // 2) Monta o texto completo, guardando o offset de início de cada peça (para o brasão).
+  let texto = "";
+  const offsets: number[] = [];
+  pecas.forEach((p, i) => {
+    offsets.push(1 + texto.length);
+    texto += `\nFls. ${i + 1}\n\n${p.texto.trim()}\n`;
+    if (i < pecas.length - 1) texto += "\f";
+  });
+  if (!texto) return;
+
+  await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+    method: "POST",
+    body: { requests: [{ insertText: { location: { index: 1 }, text: texto } }] },
+  });
+
+  // 3) Insere o brasão no início de cada peça, de trás para frente (índices não se deslocam).
+  for (const off of [...offsets].reverse()) {
+    await inserirBrasao(documentId, off);
+  }
+}
+
+/** Envia um anexo (base64) para a subpasta "Anexos" da sindicância. */
+export async function uploadAnexo(params: {
+  nome: string;
+  mimeType: string;
+  base64: string;
+  pastaId: string;
+}) {
+  const boundary = `lovable${Date.now()}`;
+  const metadata = JSON.stringify({ name: params.nome, parents: [params.pastaId] });
+  const bin = Uint8Array.from(atob(params.base64), (ch) => ch.charCodeAt(0));
+
+  const encoder = new TextEncoder();
+  const head = encoder.encode(
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n` +
+      `--${boundary}\r\nContent-Type: ${params.mimeType || "application/octet-stream"}\r\n\r\n`,
+  );
+  const tail = encoder.encode(`\r\n--${boundary}--`);
+  const body = new Uint8Array(head.length + bin.length + tail.length);
+  body.set(head, 0);
+  body.set(bin, head.length);
+  body.set(tail, head.length + bin.length);
+
+  const res = (await gwRaw("google_drive", "/upload/drive/v3/files", {
+    method: "POST",
+    contentType: `multipart/related; boundary=${boundary}`,
+    query: { uploadType: "multipart", fields: "id,name,webViewLink" },
+    body,
+  })) as { id: string; name: string; webViewLink?: string };
+
+  return {
+    fileId: res.id,
+    nome: res.name ?? params.nome,
+    url: res.webViewLink ?? `https://drive.google.com/file/d/${res.id}/view`,
+  };
+}
+
