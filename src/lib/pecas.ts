@@ -1,3 +1,17 @@
+export type AnexoJuntada = {
+  nome: string;
+  fileId: string;
+  url: string;
+};
+
+export type Juntada = {
+  id: string;
+  numero: number;
+  titulo: string;
+  data: string;
+  anexos: AnexoJuntada[];
+};
+
 export type Sindicancia = {
   id: string;
   nup: string;
@@ -18,13 +32,25 @@ export type Sindicancia = {
   /** Subpasta "Anexos" dentro da pasta da sindicância. */
   anexosId?: string;
   anexosUrl?: string;
+  /** Cidade/localidade em que os atos são lavrados. */
+  local: string;
+  /** Subordinação da OM (ex.: "12ª Brigada de Infantaria Leve"). */
+  subordinacao: string;
+  /** OM instauradora (comando que expediu a portaria). */
+  omInstauradora: string;
+  /** Documento único (autos paginados) no Google Docs. */
+  autosDocId?: string;
+  autosUrl?: string;
+  /** Juntadas do processo, cada uma com seus anexos vinculados ao NUP. */
+  juntadas: Juntada[];
 };
 
 export const ETAPAS = [
   "Recebimento da Portaria de instauração",
+  "Autuação (Capa dos Autos de Sindicância)",
   "Termo de Abertura dos Trabalhos",
   "Notificação prévia do sindicado",
-  "Autuação e juntada de documentos",
+  "Juntada de documentos",
   "Inquirição de testemunhas",
   "Depoimento do sindicado",
   "Diligências complementares",
@@ -43,12 +69,13 @@ export const STATUS = [
 ] as const;
 
 export const PECAS = [
+  { id: "autos", nome: "Autos de Sindicância (Capa)" },
   { id: "abertura", nome: "Termo de Abertura dos Trabalhos" },
   { id: "notificacao", nome: "Notificação Prévia do Sindicado" },
   { id: "inquiricao", nome: "Termo de Inquirição de Testemunha" },
   { id: "depoimento", nome: "Termo de Depoimento do Sindicado" },
   { id: "oficio", nome: "Ofício / Mandado de Intimação" },
-  { id: "juntada", nome: "Termo de Juntada de Documentos" },
+  { id: "juntada", nome: "Juntada de Documentos" },
   { id: "encerramento", nome: "Termo de Encerramento da Instrução" },
   { id: "alegacoes", nome: "Notificação para Alegações Finais" },
   { id: "prorrogacao", nome: "Pedido de Prorrogação de Prazo" },
@@ -77,6 +104,89 @@ export function diasCorridos(dataInicio: string) {
   return Math.floor((hoje.getTime() - inicio.getTime()) / 86_400_000);
 }
 
+const EXTENSO_NUM = [
+  "zero",
+  "um",
+  "dois",
+  "três",
+  "quatro",
+  "cinco",
+  "seis",
+  "sete",
+  "oito",
+  "nove",
+  "dez",
+  "onze",
+  "doze",
+  "treze",
+  "quatorze",
+  "quinze",
+  "dezesseis",
+  "dezessete",
+  "dezoito",
+  "dezenove",
+  "vinte",
+  "vinte e um",
+  "vinte e dois",
+  "vinte e três",
+  "vinte e quatro",
+  "vinte e cinco",
+  "vinte e seis",
+  "vinte e sete",
+  "vinte e oito",
+  "vinte e nove",
+  "trinta",
+  "trinta e um",
+];
+
+const MESES = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+
+function anoExtenso(ano: number) {
+  // Ex.: 2026 -> "dois mil e vinte e seis"
+  const milhar = Math.floor(ano / 1000);
+  const resto = ano % 1000;
+  const base = milhar === 2 ? "dois mil" : `${EXTENSO_NUM[milhar] ?? milhar} mil`;
+  if (resto === 0) return base;
+  const centena = Math.floor(resto / 100);
+  const dezena = resto % 100;
+  const centenas = [
+    "",
+    "cento",
+    "duzentos",
+    "trezentos",
+    "quatrocentos",
+    "quinhentos",
+    "seiscentos",
+    "setecentos",
+    "oitocentos",
+    "novecentos",
+  ][centena];
+  const partes = [centenas, dezena ? (EXTENSO_NUM[dezena] ?? `${dezena}`) : ""].filter(Boolean);
+  return `${base} e ${partes.join(" e ")}`;
+}
+
+/** "Aos vinte e três dias do mês de julho de dois mil e vinte e seis" */
+export function dataPorExtenso(iso: string) {
+  if (!iso) return "____ dias do mês de __________ de ______";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const dia = d.getDate();
+  return `${EXTENSO_NUM[dia] ?? dia} dias do mês de ${MESES[d.getMonth()]} de ${anoExtenso(d.getFullYear())}`;
+}
+
 function dataExtenso(iso: string) {
   if (!iso) return "____ de __________ de ______";
   const d = new Date(`${iso}T00:00:00`);
@@ -86,12 +196,19 @@ function dataExtenso(iso: string) {
 
 const linha = "_".repeat(66);
 
-function cabecalho(s: Sindicancia) {
+/** Cabeçalho institucional obrigatório — o brasão é inserido como imagem acima destas linhas. */
+export function cabecalho(s: Sindicancia) {
   return [
     "MINISTÉRIO DA DEFESA",
     "EXÉRCITO BRASILEIRO",
+    (s.subordinacao || "SUBORDINAÇÃO").toUpperCase(),
     (s.om || "ORGANIZAÇÃO MILITAR").toUpperCase(),
     "",
+  ].join("\n");
+}
+
+function subcabecalhoProcesso(s: Sindicancia) {
+  return [
     `SINDICÂNCIA — NUP/NUD ${s.nup || "____________"}`,
     `Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}`,
     linha,
@@ -99,51 +216,74 @@ function cabecalho(s: Sindicancia) {
   ].join("\n");
 }
 
-function fecho(s: Sindicancia, c: PecaCampos) {
-  return [
-    "",
-    `${c.local || "________________"}, ${dataExtenso(c.data)}.`,
-    "",
-    "",
-    "____________________________________",
-    `${s.sindicante || "Posto/Grad e Nome de Guerra"}`,
-    "Encarregado da Sindicância",
-    "",
-    "Referências: Portaria C Ex nr 2.394/2024 (EB10-IG-09.001) e EB10-IG-01.001.",
-  ].join("\n");
+function assinatura(s: Sindicancia) {
+  return ["", "", (s.sindicante || "Posto/Grad e Nome de Guerra").toUpperCase(), "Sindicante", ""].join(
+    "\n",
+  );
 }
 
 export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
+  const local = c.local || s.local || "____________";
   const head = cabecalho(s);
+
+  if (peca === "autos") {
+    return [
+      head,
+      "AUTOS DE SINDICÂNCIA",
+      "",
+      "",
+      `NUP: ${s.nup || "____________"}`,
+      "",
+      `SINDICANTE: ${s.sindicante || "____________"}`,
+      "",
+      `SINDICADO: ${s.sindicado || "____________"}`,
+      "",
+      `OBJETO: ${s.objeto || "____________"}`,
+      "",
+    ].join("\n");
+  }
+
   const corpo = (() => {
     switch (peca) {
       case "abertura":
         return [
-          "TERMO DE ABERTURA DOS TRABALHOS",
+          "TERMO DE ABERTURA",
           "",
-          `Aos ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, nas dependências da ${s.om || "OM"}, o Encarregado da Sindicância abaixo assinado, designado pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, da lavra do(a) ${s.autoridade || "Autoridade Instauradora"}, dá por iniciados os trabalhos apuratórios destinados a ${s.objeto || "apurar os fatos constantes da portaria instauradora"}.`,
+          `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, no quartel do ${s.om || "OM"}, em cumprimento ao determinado na Portaria nº ${s.portariaNumero || "____"}, do Sr ${s.autoridade || "Autoridade Instauradora"}, Comandante do ${s.omInstauradora || s.om || "OM Instauradora"}, faço a abertura dos trabalhos atinentes a presente sindicância, do que, para constar, lavrei o presente termo.`,
+        ].join("\n");
+
+      case "juntada":
+        return [
+          "JUNTADA",
           "",
-          "Os trabalhos observarão o rito da Portaria C Ex nr 2.394/2024 (EB10-IG-09.001), assegurados o contraditório e a ampla defesa, com prazo de 30 (trinta) dias corridos para conclusão, prorrogável na forma regulamentar.",
+          `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, no quartel do ${s.om || "OM"}, faço a juntada aos autos da presente sindicância dos documentos a seguir especificados, do que, para constar, lavrei o presente termo.`,
           "",
-          "Para constar, lavrei o presente termo, que vai por mim assinado.",
+          (c.documentos || "xxxxxxx")
+            .split("\n")
+            .map((d) => d.trim())
+            .filter(Boolean)
+            .map((d, i, arr) => `${i + 1}. ${d.replace(/[.;]$/, "")}${i === arr.length - 1 ? "." : ";"}`)
+            .join("\n\n"),
         ].join("\n");
 
       case "notificacao":
         return [
+          subcabecalhoProcesso(s),
           "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
           "",
           `Notifico V. S.ª, ${s.sindicado || "Posto/Grad e Nome de Guerra do sindicado"}, ${c.qualificacao || "qualificação"}, de que responde à presente Sindicância, instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, tendo por objeto ${s.objeto || "os fatos nela descritos"}.`,
           "",
           "Fica assegurado o direito ao contraditório e à ampla defesa, podendo acompanhar todos os atos do procedimento, pessoalmente ou por procurador, arrolar testemunhas, requerer diligências e produzir provas em direito admitidas.",
           "",
-          `Deverá comparecer no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${c.local || "____________"}, a fim de ser ouvido em declarações.`,
+          `Deverá comparecer no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, a fim de ser ouvido em declarações.`,
         ].join("\n");
 
       case "inquiricao":
         return [
+          subcabecalhoProcesso(s),
           "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
           "",
-          `Aos ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${c.local || "____________"}, presente o Encarregado da Sindicância, compareceu ${c.destinatario || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de testemunha, advertido(a) das penas cominadas ao falso testemunho, prometeu dizer a verdade do que soubesse e lhe fosse perguntado.`,
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, presente o Sindicante, compareceu ${c.destinatario || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de testemunha, advertido(a) das penas cominadas ao falso testemunho, prometeu dizer a verdade do que soubesse e lhe fosse perguntado.`,
           "",
           "PERGUNTAS FORMULADAS:",
           c.perguntas || "1) ...",
@@ -151,7 +291,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           "RESPOSTAS:",
           c.respostas || "1) ...",
           "",
-          "Nada mais havendo, encerrou-se o presente termo, lido e achado conforme, que vai assinado pelo Encarregado e pelo(a) depoente.",
+          "Nada mais havendo, encerrou-se o presente termo, lido e achado conforme, que vai assinado pelo Sindicante e pelo(a) depoente.",
           "",
           "",
           "____________________________________",
@@ -160,9 +300,10 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
       case "depoimento":
         return [
+          subcabecalhoProcesso(s),
           "TERMO DE DECLARAÇÕES DO SINDICADO",
           "",
-          `Aos ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${c.local || "____________"}, presente o Encarregado da Sindicância, compareceu ${s.sindicado || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de sindicado, cientificado do direito ao silêncio, ao contraditório e à ampla defesa, respondeu:`,
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, presente o Sindicante, compareceu ${s.sindicado || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de sindicado, cientificado do direito ao silêncio, ao contraditório e à ampla defesa, respondeu:`,
           "",
           "PERGUNTAS FORMULADAS:",
           c.perguntas || "1) ...",
@@ -179,6 +320,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
       case "oficio":
         return [
+          subcabecalhoProcesso(s),
           `Ofício nr ____ - Sind ${s.nup || ""}`,
           "",
           `Ao Senhor ${c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade"}`,
@@ -186,31 +328,19 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           "",
           "Assunto: Intimação para comparecimento",
           "",
-          `1. Na condição de Encarregado da Sindicância instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, solicito a V. S.ª as providências necessárias ao comparecimento no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${c.local || "____________"}.`,
+          `1. Na condição de Sindicante da Sindicância instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, solicito a V. S.ª as providências necessárias ao comparecimento no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}.`,
           "",
           `2. ${c.justificativa || "A medida destina-se à instrução do procedimento, nos termos da EB10-IG-09.001."}`,
           "",
           "3. Coloco-me à disposição para os esclarecimentos que se fizerem necessários.",
         ].join("\n");
 
-      case "juntada":
-        return [
-          "TERMO DE JUNTADA DE DOCUMENTOS",
-          "",
-          `Aos ${dataExtenso(c.data)}, nesta ${s.om || "OM"}, o Encarregado da Sindicância determinou a juntada aos autos dos seguintes documentos:`,
-          "",
-          c.documentos || "a) ...",
-          "",
-          `${c.justificativa || "Os documentos são pertinentes à apuração e passam a integrar os autos, devidamente numerados e rubricados."}`,
-          "",
-          "Para constar, lavrei o presente termo.",
-        ].join("\n");
-
       case "encerramento":
         return [
+          subcabecalhoProcesso(s),
           "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
           "",
-          `Aos ${dataExtenso(c.data)}, o Encarregado da Sindicância declara encerrada a fase instrutória do procedimento instaurado pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, havendo sido produzidas todas as provas reputadas necessárias ao esclarecimento dos fatos.`,
+          `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, o Sindicante declara encerrada a fase instrutória do procedimento instaurado pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, havendo sido produzidas todas as provas reputadas necessárias ao esclarecimento dos fatos.`,
           "",
           `${c.justificativa || "Não subsistem diligências pendentes."}`,
           "",
@@ -219,6 +349,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
       case "alegacoes":
         return [
+          subcabecalhoProcesso(s),
           "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
           "",
           `Notifico V. S.ª, ${s.sindicado || "Posto/Grad e Nome de Guerra"}, do encerramento da instrução da Sindicância instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}.`,
@@ -230,9 +361,10 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
       case "prorrogacao":
         return [
+          subcabecalhoProcesso(s),
           "PEDIDO DE PRORROGAÇÃO DE PRAZO",
           "",
-          `Ao(À) ${s.autoridade || "Autoridade Instauradora"}`,
+          `Ao(À) ${s.autoridade || "Autoridade Instauradora"}, Comandante do ${s.omInstauradora || s.om || "OM Instauradora"}`,
           "",
           `1. Solicito a prorrogação do prazo para conclusão da Sindicância instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, por mais ${c.prazoDias || "20"} (____) dias corridos.`,
           "",
@@ -242,10 +374,13 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           "",
           "4. Nestes termos, peço deferimento.",
         ].join("\n");
+
+      default:
+        return "";
     }
   })();
 
-  return `${head}${corpo}\n${fecho(s, c)}\n`;
+  return `${head}${corpo}\n${assinatura(s)}`;
 }
 
 export type Relatorio = {
@@ -258,6 +393,7 @@ export type Relatorio = {
 export function gerarRelatorio(s: Sindicancia, r: Relatorio, local: string, data: string) {
   return [
     cabecalho(s),
+    subcabecalhoProcesso(s),
     "RELATÓRIO DO SINDICANTE",
     "",
     "1. INTRODUÇÃO",
@@ -272,17 +408,8 @@ export function gerarRelatorio(s: Sindicancia, r: Relatorio, local: string, data
     "",
     "4. CONCLUSÃO",
     r.conclusao || "...",
-    fecho(s, {
-      local,
-      data,
-      hora: "",
-      destinatario: "",
-      qualificacao: "",
-      documentos: "",
-      perguntas: "",
-      respostas: "",
-      justificativa: "",
-      prazoDias: "",
-    }),
+    "",
+    `${local || s.local || "________________"}, ${dataExtenso(data)}.`,
+    assinatura(s),
   ].join("\n");
 }
