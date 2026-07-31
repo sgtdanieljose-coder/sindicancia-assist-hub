@@ -105,8 +105,8 @@ export const HEADERS = [
   "autos_doc_id",
   "autos_url",
   "juntadas",
+  "prazo_prorrogado_dias",
 ];
-
 
 /** Converte um índice de coluna 1-based em letra de coluna do Sheets (1 -> A, 17 -> Q, 27 -> AA...). */
 function columnLetter(index: number): string {
@@ -335,7 +335,41 @@ export async function getDocText(documentId: string): Promise<string> {
       if (e.textRun?.content) partes.push(e.textRun.content);
     }
   }
-  return partes.join("").replace(/\n{3,}/g, "\n\n").trim();
+  return partes
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Substitui o conteúdo de um Google Doc já existente (apaga o corpo e reinsere o texto + brasão),
+ * usado para reexportar peças "únicas" sem criar um documento duplicado a cada ajuste.
+ */
+export async function updateDocContent(documentId: string, content: string) {
+  const doc = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
+    "google_docs",
+    `/v1/documents/${documentId}`,
+    { query: { fields: "body.content.endIndex" } },
+  );
+  const endIndex = doc.body?.content?.at(-1)?.endIndex ?? 1;
+
+  const requests: unknown[] = [];
+  if (endIndex > 2) {
+    requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: endIndex - 1 } } });
+  }
+  requests.push({ insertText: { location: { index: 1 }, text: `\n${content}` } });
+
+  await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+    method: "POST",
+    body: { requests },
+  });
+  await inserirBrasao(documentId, 1);
+
+  return {
+    documentId,
+    url: `https://docs.google.com/document/d/${documentId}/edit`,
+    embedUrl: `https://docs.google.com/document/d/${documentId}/preview`,
+  };
 }
 
 /** Cria (se necessário) o documento único dos autos e devolve seus dados. */
@@ -442,4 +476,3 @@ export async function uploadAnexo(params: {
     url: res.webViewLink ?? `https://drive.google.com/file/d/${res.id}/view`,
   };
 }
-
