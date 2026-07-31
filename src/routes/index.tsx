@@ -19,7 +19,14 @@ import {
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
 import { salvarSindicancia } from "@/lib/sindicancias.functions";
-import { ETAPAS, STATUS, diasCorridos, type Sindicancia } from "@/lib/pecas";
+import {
+  ETAPAS,
+  PRAZO_ALERTA_ANTECEDENCIA_DIAS,
+  STATUS,
+  diasCorridos,
+  prazoTotalDias,
+  type Sindicancia,
+} from "@/lib/pecas";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -59,8 +66,8 @@ const vazia: Sindicancia = {
   subordinacao: "",
   omInstauradora: "",
   juntadas: [],
+  prazoProrrogadoDias: 0,
 };
-
 
 function Dashboard() {
   const { itens, erro, carregando, selecionada, setSelecionadaId, recarregar } = useSindicancias();
@@ -83,16 +90,21 @@ function Dashboard() {
   const set = (k: keyof Sindicancia, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   const dias = diasCorridos(form.portariaData);
-  const restantes = 30 - dias;
-  const alerta = dias >= 20 && dias < 30;
-  const vencido = dias >= 30;
+  const totalPrazo = prazoTotalDias(form);
+  const restantes = totalPrazo - dias;
+  const alerta = dias >= totalPrazo - PRAZO_ALERTA_ANTECEDENCIA_DIAS && dias < totalPrazo;
+  const vencido = dias >= totalPrazo;
+
+  const nupDuplicado = form.nup.trim()
+    ? itens.some(
+        (i) => i.id !== form.id && i.nup.trim().toLowerCase() === form.nup.trim().toLowerCase(),
+      )
+    : false;
 
   const toggleEtapa = (etapa: string) => {
     setForm((f) => ({
       ...f,
-      etapas: f.etapas.includes(etapa)
-        ? f.etapas.filter((e) => e !== etapa)
-        : [...f.etapas, etapa],
+      etapas: f.etapas.includes(etapa) ? f.etapas.filter((e) => e !== etapa) : [...f.etapas, etapa],
     }));
   };
 
@@ -119,6 +131,66 @@ function Dashboard() {
         <div className="painel flex items-start gap-2 p-4 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span className="min-w-0 break-words">{erro}</span>
+        </div>
+      )}
+
+      {itens.length > 0 && (
+        <div className="painel space-y-3 p-4 sm:p-5">
+          <h2 className="rotulo">Painel geral — todas as sindicâncias</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="py-2 pr-3 font-normal">NUP</th>
+                  <th className="py-2 pr-3 font-normal">Sindicado</th>
+                  <th className="py-2 pr-3 font-normal">Status</th>
+                  <th className="py-2 pr-3 font-normal">Prazo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {itens.map((i) => {
+                  const diasItem = diasCorridos(i.portariaData);
+                  const totalItem = prazoTotalDias(i);
+                  const venceuItem = i.portariaData ? diasItem >= totalItem : false;
+                  const pertoItem =
+                    !!i.portariaData &&
+                    diasItem >= totalItem - PRAZO_ALERTA_ANTECEDENCIA_DIAS &&
+                    diasItem < totalItem;
+                  return (
+                    <tr
+                      key={i.id}
+                      onClick={() => setSelecionadaId(i.id)}
+                      className={`cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/50 ${
+                        selecionada?.id === i.id ? "bg-muted/70" : ""
+                      }`}
+                    >
+                      <td className="py-2 pr-3">{i.nup || i.id}</td>
+                      <td className="py-2 pr-3">{i.sindicado || "—"}</td>
+                      <td className="py-2 pr-3">
+                        <Badge variant="outline">{i.status}</Badge>
+                      </td>
+                      <td className="py-2 pr-3">
+                        {!i.portariaData ? (
+                          "—"
+                        ) : venceuItem ? (
+                          <Badge variant="destructive">Vencido</Badge>
+                        ) : pertoItem ? (
+                          <Badge
+                            className="border-warning/40 bg-warning/10 text-warning"
+                            variant="outline"
+                          >
+                            {totalItem - diasItem} dia(s)
+                          </Badge>
+                        ) : (
+                          `${Math.max(totalItem - diasItem, 0)} dia(s)`
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -215,6 +287,16 @@ function Dashboard() {
             </div>
           </div>
 
+          {nupDuplicado && (
+            <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Já existe outra sindicância cadastrada com este NUP. Como a pasta do Drive é
+                reaproveitada pelo nome, confira se não é duplicidade antes de salvar.
+              </span>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label>Objeto da apuração</Label>
             <Textarea
@@ -242,10 +324,10 @@ function Dashboard() {
               <h2 className="rotulo">Cronômetro de prazo</h2>
             </div>
             <p className="font-serif text-3xl font-semibold">
-              {form.portariaData ? `${Math.max(dias, 0)} / 30` : "— / 30"}
+              {form.portariaData ? `${Math.max(dias, 0)} / ${totalPrazo}` : `— / ${totalPrazo}`}
               <span className="ml-2 text-sm font-normal text-muted-foreground">dias corridos</span>
             </p>
-            <Progress value={Math.min((dias / 30) * 100, 100)} />
+            <Progress value={Math.min((dias / totalPrazo) * 100, 100)} />
             {form.portariaData && (
               <p className="text-sm text-muted-foreground">
                 {vencido
@@ -253,11 +335,29 @@ function Dashboard() {
                   : `Restam ${restantes} dia(s) para a conclusão.`}
               </p>
             )}
+            <div className="space-y-1.5">
+              <Label>Dias de prorrogação concedidos</Label>
+              <Input
+                type="number"
+                min={0}
+                value={form.prazoProrrogadoDias ?? 0}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    prazoProrrogadoDias: Math.max(0, Number(e.target.value) || 0),
+                  }))
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Preencha após a prorrogação ser deferida — soma-se aos 30 dias regulamentares.
+              </p>
+            </div>
             {(alerta || vencido) && (
               <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
                 <AlertTriangle className="mb-1 size-4" />
-                Atingido o marco de 20 dias corridos: recomenda-se gerar o Pedido de Prorrogação de
-                Prazo no módulo Gerador de Peças.
+                {vencido
+                  ? "Prazo esgotado — se ainda não houve prorrogação, gere e registre o Pedido de Prorrogação de Prazo o quanto antes."
+                  : `Faltam ${restantes} dia(s) para o fim do prazo: avalie gerar o Pedido de Prorrogação de Prazo no módulo Gerador de Peças.`}
               </div>
             )}
             <Badge variant="outline">{form.status}</Badge>
