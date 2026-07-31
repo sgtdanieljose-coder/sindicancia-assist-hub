@@ -163,15 +163,31 @@ function Dashboard() {
               />
             </div>
             <Campo
+              label="Local (cidade dos atos)"
+              value={form.local}
+              onChange={(v) => set("local", v)}
+            />
+            <Campo
+              label="Subordinação"
+              value={form.subordinacao}
+              onChange={(v) => set("subordinacao", v)}
+            />
+            <Campo
               label="Organização Militar (OM)"
               value={form.om}
               onChange={(v) => set("om", v)}
+            />
+            <Campo
+              label="OM Instauradora"
+              value={form.omInstauradora}
+              onChange={(v) => set("omInstauradora", v)}
             />
             <Campo
               label="Autoridade Instauradora"
               value={form.autoridade}
               onChange={(v) => set("autoridade", v)}
             />
+
             <Campo
               label="Sindicante (Posto/Grad e Nome de Guerra)"
               value={form.sindicante}
