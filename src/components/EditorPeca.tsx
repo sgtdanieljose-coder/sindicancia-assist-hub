@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ExternalLink, FileUp, Loader2 } from "lucide-react";
@@ -26,7 +26,10 @@ type Props = {
   titulo: string;
   conteudo: string;
   sindicanciaId: string;
-  pecasExistentes: { titulo: string; documentId: string }[];
+  pecasExistentes: { titulo: string; documentId: string; pecaId?: string }[];
+  pecaId?: string;
+  unica?: boolean;
+  etapa?: string;
   onChange: (texto: string) => void;
   onExportado?: () => void;
 };
@@ -36,46 +39,88 @@ export function EditorPeca({
   conteudo,
   sindicanciaId,
   pecasExistentes,
+  pecaId,
+  unica,
+  etapa,
   onChange,
   onExportado,
 }: Props) {
-  const [doc, setDoc] = useState<{ url: string; embedUrl: string } | null>(null);
+  const existente = unica && pecaId ? pecasExistentes.find((d) => d.pecaId === pecaId) : undefined;
+
+  const [doc, setDoc] = useState<{ url: string; embedUrl: string } | null>(
+    existente
+      ? {
+          url: `https://docs.google.com/document/d/${existente.documentId}/edit`,
+          embedUrl: `https://docs.google.com/document/d/${existente.documentId}/preview`,
+        }
+      : null,
+  );
   const [autosUrl, setAutosUrl] = useState<string | null>(null);
   const [perguntando, setPerguntando] = useState(false);
   const total = pecasExistentes.length + 1;
   const [posicao, setPosicao] = useState(String(total));
 
+  useEffect(() => {
+    setDoc(
+      existente
+        ? {
+            url: `https://docs.google.com/document/d/${existente.documentId}/edit`,
+            embedUrl: `https://docs.google.com/document/d/${existente.documentId}/preview`,
+          }
+        : null,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existente?.documentId]);
+
   const exportar = useMutation({
-    mutationFn: (pos: number) =>
-      exportarParaDocs({ data: { sindicanciaId, titulo, conteudo, posicao: pos } }),
+    mutationFn: (pos?: number) =>
+      exportarParaDocs({
+        data: { sindicanciaId, titulo, conteudo, posicao: pos, pecaId, unica, etapa },
+      }),
     onSuccess: (d) => {
       setDoc(d);
       setAutosUrl(d.autosUrl ?? null);
       setPerguntando(false);
-      toast.success(`Peça salva individualmente e inserida na página ${d.posicao} dos autos`);
+      toast.success(
+        d.atualizado
+          ? `Peça atualizada (Fls. ${d.posicao}) — documento individual e autos sincronizados`
+          : `Peça salva individualmente e inserida na página ${d.posicao} dos autos`,
+      );
       onExportado?.();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const abrir = () => {
-    setPosicao(String(total));
-    setPerguntando(true);
+  const acionar = () => {
+    if (existente) {
+      exportar.mutate(undefined);
+    } else {
+      setPosicao(String(total));
+      setPerguntando(true);
+    }
   };
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="rotulo">Minuta gerada — revise antes de exportar</p>
-        <Button onClick={abrir} disabled={exportar.isPending || !conteudo.trim()} size="sm">
+        <Button onClick={acionar} disabled={exportar.isPending || !conteudo.trim()} size="sm">
           {exportar.isPending ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
             <FileUp className="size-4" />
           )}
-          Exportar para Google Docs
+          {existente ? "Atualizar no Google Docs" : "Exportar para Google Docs"}
         </Button>
       </div>
+
+      {existente && (
+        <p className="text-xs text-muted-foreground">
+          Esta peça já foi exportada (Fls.{" "}
+          {pecasExistentes.findIndex((d) => d.pecaId === pecaId) + 1} dos autos). Exportar novamente
+          atualiza o mesmo documento em vez de duplicá-lo.
+        </p>
+      )}
 
       <Textarea
         value={conteudo}
