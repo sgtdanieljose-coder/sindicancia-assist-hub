@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { Juntada, Sindicancia } from "./pecas";
-import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
+import { sindicanciaToRow } from "./sindicancias.mapper";
+import { carregar } from "./sindicancias.server";
 
 export const listarSindicancias = createServerFn({ method: "GET" }).handler(async () => {
   const { readRows } = await import("./google.server");
@@ -42,14 +43,6 @@ export const salvarSindicancia = createServerFn({ method: "POST" })
     }
     return rowToSindicancia(row);
   });
-
-async function carregar(sindicanciaId: string) {
-  const { readRows } = await import("./google.server");
-  const rows = await readRows();
-  const idx = rows.findIndex((r) => r[0] === sindicanciaId);
-  if (idx < 0) throw new Error("Sindicância não localizada na planilha.");
-  return { atual: rowToSindicancia(rows[idx]), linha: idx + 2 };
-}
 
 /**
  * Exporta a peça: cria um Google Doc individual e insere a peça no documento único

@@ -9,7 +9,7 @@ function safeParse<T>(v: string | undefined, fallback: T): T {
   }
 }
 
-function rowToSindicancia(row: string[]): Sindicancia {
+export function rowToSindicancia(row: string[]): Sindicancia {
   return {
     id: row[0] ?? "",
     nup: row[1] ?? "",
