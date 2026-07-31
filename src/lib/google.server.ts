@@ -44,9 +44,42 @@ export async function gw<T = unknown>(
   return (await res.json()) as T;
 }
 
+/** Chamada crua ao gateway (usada em uploads multipart do Drive). */
+export async function gwRaw(
+  connector: Connector,
+  path: string,
+  init: { method: string; body: BodyInit; contentType: string; query?: Record<string, string> },
+): Promise<Record<string, unknown>> {
+  const lovableKey = process.env.LOVABLE_API_KEY;
+  const connKey = process.env[KEY_ENV[connector]];
+  if (!lovableKey || !connKey) {
+    throw new Error(`Conexão Google indisponível (${connector}). Reconecte o Google Workspace.`);
+  }
+  const qs = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
+  const res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
+    method: init.method,
+    headers: {
+      Authorization: `Bearer ${lovableKey}`,
+      "X-Connection-Api-Key": connKey,
+      "Content-Type": init.contentType,
+    },
+    body: init.body,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`Gateway ${connector} ${path} falhou [${res.status}]: ${text}`);
+    throw new Error(`Google API [${res.status}]: ${text.slice(0, 400)}`);
+  }
+  return (await res.json()) as Record<string, unknown>;
+}
+
 export const SPREADSHEET_ID = "1Fy-JSNpRJXKE89Wm--zo0cFPJwU1Daf_ygUg78-s1jI";
 export const DRIVE_FOLDER_ID = "1zcQGM4T6-PAiEttCAdK6aqNBrUnQ-u6G";
 export const SHEET_TAB = "Sindicancias";
+
+/** URL pública do brasão da República inserido no topo de toda peça. */
+export const BRASAO_URL =
+  "https://sindicancia-assist-hub.lovable.app/__l5e/assets-v1/f23d5d02-916f-4e73-809c-9fe4c6876f2e/brasao-republica.png";
 
 export const HEADERS = [
   "id",
@@ -66,7 +99,14 @@ export const HEADERS = [
   "pasta_url",
   "anexos_id",
   "anexos_url",
+  "local",
+  "subordinacao",
+  "om_instauradora",
+  "autos_doc_id",
+  "autos_url",
+  "juntadas",
 ];
+
 
 /** Converte um índice de coluna 1-based em letra de coluna do Sheets (1 -> A, 17 -> Q, 27 -> AA...). */
 function columnLetter(index: number): string {
