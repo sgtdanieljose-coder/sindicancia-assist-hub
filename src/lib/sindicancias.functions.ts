@@ -67,6 +67,8 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       updateDocContent,
       updateRow,
       ensureAutosDoc,
+      ensureSindicanciaFolders,
+      arquivoAtivo,
       rebuildAutos,
       getDocText,
       formatarCapaAutos,
@@ -75,23 +77,54 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
 
     const { atual, linha } = await carregar(data.sindicanciaId);
 
+    // A pasta da sindicância pode ter sido apagada/movida pra lixeira no Drive por fora do
+    // app — nesse caso o ID salvo fica "morto" e os próximos documentos seriam criados fora
+    // dela sem avisar ninguém. Confere e recria antes de seguir.
+    if (atual.nup?.trim() && !(await arquivoAtivo(atual.pastaId))) {
+      try {
+        const pastas = await ensureSindicanciaFolders(atual.nup);
+        atual.pastaId = pastas.pastaId;
+        atual.pastaUrl = pastas.pastaUrl;
+        atual.anexosId = pastas.anexosId;
+        atual.anexosUrl = pastas.anexosUrl;
+      } catch (e) {
+        console.warn("Não foi possível recriar a pasta da sindicância no Drive:", e);
+      }
+    }
+
     // Peça "única" (ex.: Termo de Abertura) já exportada antes? Atualiza o mesmo documento,
-    // na mesma posição, em vez de criar mais um Google Doc duplicado.
-    const existente =
+    // na mesma posição, em vez de criar mais um Google Doc duplicado — a menos que o
+    // documento individual tenha sido apagado/perdido no Drive, caso em que é recriado na
+    // mesma posição em vez de silenciosamente não fazer nada.
+    const existenteBruto =
       data.unica && data.pecaId
         ? atual.documentos.find((d) => d.pecaId === data.pecaId)
+        : undefined;
+    const existenteAtivo =
+      existenteBruto && (await arquivoAtivo(existenteBruto.documentId))
+        ? existenteBruto
         : undefined;
 
     let lista = [...atual.documentos];
     let doc: { documentId: string; url: string; embedUrl: string };
     let pos: number;
 
-    if (existente) {
-      doc = await updateDocContent(existente.documentId, data.conteudo);
-      pos = lista.findIndex((d) => d.documentId === existente.documentId) + 1;
+    if (existenteAtivo) {
+      doc = await updateDocContent(existenteAtivo.documentId, data.conteudo);
+      pos = lista.findIndex((d) => d.documentId === existenteAtivo.documentId) + 1;
       lista = lista.map((d) =>
-        d.documentId === existente.documentId ? { ...d, titulo: data.titulo } : d,
+        d.documentId === existenteAtivo.documentId ? { ...d, titulo: data.titulo } : d,
       );
+    } else if (existenteBruto) {
+      doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
+      const idxAntigo = lista.findIndex((d) => d.documentId === existenteBruto.documentId);
+      pos = idxAntigo + 1;
+      lista[idxAntigo] = {
+        titulo: data.titulo,
+        documentId: doc.documentId,
+        url: doc.url,
+        pecaId: data.pecaId,
+      };
     } else {
       doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
       const total = lista.length + 1;
@@ -152,7 +185,13 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       console.warn("Falha ao registrar documento na planilha:", e);
     }
 
-    return { ...doc, posicao: pos, autosUrl, atualizado: Boolean(existente) };
+    return {
+      ...doc,
+      posicao: pos,
+      autosUrl,
+      atualizado: Boolean(existenteAtivo),
+      recriado: Boolean(existenteBruto) && !existenteAtivo,
+    };
   });
 
 /** Cria uma nova juntada (numerada) vinculada ao NUP da sindicância. */
@@ -185,17 +224,21 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
     }) => data,
   )
   .handler(async ({ data }) => {
-    const { uploadAnexo, updateRow, ensureSindicanciaFolders } = await import("./google.server");
+    const { uploadAnexo, updateRow, ensureSindicanciaFolders, arquivoAtivo } =
+      await import("./google.server");
     const { atual, linha } = await carregar(data.sindicanciaId);
 
     let anexosId = atual.anexosId;
-    if (!anexosId) {
+    if (!(await arquivoAtivo(anexosId))) {
       const pastas = await ensureSindicanciaFolders(atual.nup);
       atual.pastaId = pastas.pastaId;
       atual.pastaUrl = pastas.pastaUrl;
       atual.anexosId = pastas.anexosId;
       atual.anexosUrl = pastas.anexosUrl;
       anexosId = pastas.anexosId;
+    }
+    if (!anexosId) {
+      throw new Error("Não foi possível localizar ou criar a pasta de anexos no Drive.");
     }
 
     const arquivo = await uploadAnexo({
