@@ -197,6 +197,23 @@ export async function updateRow(rowIndex: number, row: string[]) {
   });
 }
 
+/**
+ * Verifica se um arquivo/pasta do Drive ainda existe e não está na lixeira. O Drive costuma
+ * mover para a lixeira em vez de apagar de vez, e a API do Docs continua aceitando leitura e
+ * escrita em arquivos na lixeira — por isso não basta tentar escrever e ver se deu erro.
+ */
+export async function arquivoAtivo(id?: string): Promise<boolean> {
+  if (!id) return false;
+  try {
+    const meta = await gw<{ trashed?: boolean }>("google_drive", `/drive/v3/files/${id}`, {
+      query: { fields: "trashed" },
+    });
+    return !meta.trashed;
+  } catch {
+    return false;
+  }
+}
+
 /** Busca uma subpasta pelo nome dentro de um pai; cria se não existir. Idempotente. */
 async function obterOuCriarPasta(
   nome: string,
@@ -561,7 +578,7 @@ export async function updateDocContent(documentId: string, content: string) {
 
 /** Cria (se necessário) o documento único dos autos e devolve seus dados. */
 export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?: string) {
-  if (autosDocId) {
+  if (autosDocId && (await arquivoAtivo(autosDocId))) {
     return {
       documentId: autosDocId,
       url: `https://docs.google.com/document/d/${autosDocId}/edit`,
