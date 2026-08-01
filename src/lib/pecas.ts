@@ -249,8 +249,7 @@ const linha = "_".repeat(66);
 
 /** Cabeçalho institucional obrigatório — o brasão é inserido como imagem acima destas linhas. */
 export function cabecalho(s: Sindicancia) {
-  const linhasSubordinacao = (s.subordinacao || "SUBORDINAÇÃO")
-    .toUpperCase()
+  const linhasSubordinacao = (s.subordinacao || "Subordinação")
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
@@ -290,6 +289,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
       "AUTOS DE SINDICÂNCIA",
       "",
       "",
+      "",
       `NUP: ${s.nup || "____________"}`,
       "",
       `SINDICANTE: ${s.sindicante || "____________"}`,
@@ -303,12 +303,20 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
   const corpo = (() => {
     switch (peca) {
-      case "abertura":
+      case "abertura": {
+        const dataTxt = c.data ? dataPorExtenso(c.data) : "“data por extenso”";
+        const localTxt = c.local || s.local || "“local adicionado na base de dados”";
+        const omTxt = s.om || "“OM adicionada na base de dados”";
+        const portariaTxt = s.portariaNumero || "“Portaria adicionada na base”";
+        const autoridadeTxt = s.autoridade || "“Autoridade Instauradora da base de dados”";
+        const omInstTxt =
+          s.omInstauradora || s.om || "“OM Instauradora adicionada na base de dados”";
         return [
           "TERMO DE ABERTURA",
           "",
-          `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, no quartel do ${s.om || "OM"}, em cumprimento ao determinado na Portaria nº ${s.portariaNumero || "____"}, do Sr ${s.autoridade || "Autoridade Instauradora"}, Comandante do ${s.omInstauradora || s.om || "OM Instauradora"}, faço a abertura dos trabalhos atinentes a presente sindicância, do que, para constar, lavrei o presente termo.`,
+          `Aos ${dataTxt} nesta cidade de ${localTxt}, no quartel do ${omTxt}, em cumprimento ao determinado na Portaria nº ${portariaTxt}, do Sr ${autoridadeTxt}, Comandante do ${omInstTxt}, faço a abertura dos trabalhos atinentes a presente sindicância, do que, para constar, lavrei o presente termo.`,
         ].join("\n");
+      }
 
       case "juntada":
         return [
