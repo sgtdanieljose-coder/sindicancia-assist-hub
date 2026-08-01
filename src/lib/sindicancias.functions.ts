@@ -70,6 +70,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       rebuildAutos,
       getDocText,
       formatarCapaAutos,
+      formatarTermoAbertura,
     } = await import("./google.server");
 
     const { atual, linha } = await carregar(data.sindicanciaId);
@@ -104,12 +105,18 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     }
     atual.documentos = lista;
 
-    // Formatação especial (negrito/centralização/sublinhado) da Capa dos Autos.
+    // Formatação especial (negrito/centralização/sublinhado) de peças com layout próprio.
     if (data.pecaId === "autos") {
       try {
         await formatarCapaAutos(doc.documentId);
       } catch (e) {
         console.warn("Falha ao formatar a Capa dos Autos:", e);
+      }
+    } else if (data.pecaId === "abertura") {
+      try {
+        await formatarTermoAbertura(doc.documentId);
+      } catch (e) {
+        console.warn("Falha ao formatar o Termo de Abertura:", e);
       }
     }
 
