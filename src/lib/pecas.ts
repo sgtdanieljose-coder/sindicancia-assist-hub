@@ -247,6 +247,26 @@ function dataExtenso(iso: string) {
 
 const linha = "_".repeat(66);
 
+// ====================================================================================
+// Convenção de formatação-base de TODA peça (documento individual e a cópia dela dentro
+// do documento único dos autos — aplicada em src/lib/google.server.ts, que usa a MESMA
+// lógica nos dois lugares para nunca ficarem dessincronizados):
+//   1) Brasão da República no topo.
+//   2) Cabeçalho institucional (timbre / Subordinação) em negrito e centralizado.
+//   3) 4 linhas em branco entre o cabeçalho e o título da peça — ver ESPACO_ANTES_TITULO.
+//   4) Título da peça em negrito, sublinhado e centralizado.
+//   5) Corpo do texto (peças com parágrafo narrativo) justificado, com recuo de 1ª linha.
+//   6) Assinatura ao final: nome centralizado (peso normal) e a função/cargo (ex.:
+//      "Sindicante") centralizada e em negrito — sempre as duas últimas linhas não vazias.
+//
+// Ao escrever uma peça nova: comece o corpo com ...ESPACO_ANTES_TITULO, "TÍTULO DA PEÇA",
+// "", <corpo>, e cadastre esse título literal em TITULOS_PECA (google.server.ts) — o resto
+// (negrito/centralização/sublinhado/justificado/assinatura, nos dois documentos) é automático.
+// ====================================================================================
+
+/** Linhas em branco padrão entre o cabeçalho institucional e o título de qualquer peça. */
+const ESPACO_ANTES_TITULO = ["", "", "", ""];
+
 /** Cabeçalho institucional obrigatório — o brasão é inserido como imagem acima destas linhas. */
 export function cabecalho(s: Sindicancia) {
   const linhasSubordinacao = (s.subordinacao || "Subordinação")
@@ -265,6 +285,7 @@ function subcabecalhoProcesso(s: Sindicancia) {
   ].join("\n");
 }
 
+/** A função/cargo (última linha) vira negrito automaticamente — ver requestsAssinatura. */
 function assinatura(s: Sindicancia) {
   return [
     "",
@@ -282,10 +303,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
   if (peca === "autos") {
     return [
       head.replace(/\n+$/, ""),
-      "",
-      "",
-      "",
-      "",
+      ...ESPACO_ANTES_TITULO,
       "AUTOS DE SINDICÂNCIA",
       "",
       "",
@@ -312,6 +330,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
         const omInstTxt =
           s.omInstauradora || s.om || "“OM Instauradora adicionada na base de dados”";
         return [
+          ...ESPACO_ANTES_TITULO,
           "TERMO DE ABERTURA",
           "",
           `Aos ${dataTxt} nesta cidade de ${localTxt}, no quartel do ${omTxt}, em cumprimento ao determinado na Portaria nº ${portariaTxt}, do Sr ${autoridadeTxt}, Comandante do ${omInstTxt}, faço a abertura dos trabalhos atinentes a presente sindicância, do que, para constar, lavrei o presente termo.`,
@@ -320,6 +339,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
       case "juntada":
         return [
+          ...ESPACO_ANTES_TITULO,
           "JUNTADA",
           "",
           `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, no quartel do ${s.om || "OM"}, faço a juntada aos autos da presente sindicância dos documentos a seguir especificados, do que, para constar, lavrei o presente termo.`,
