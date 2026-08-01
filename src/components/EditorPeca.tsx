@@ -88,6 +88,9 @@ export function EditorPeca({
             ? `O documento anterior não foi encontrado no Drive — recriado na Fls. ${d.posicao}`
             : `Peça salva individualmente e inserida na página ${d.posicao} dos autos`,
       );
+      if (d.avisoFormatacao) {
+        toast.warning(`Documento salvo, mas a formatação falhou: ${d.avisoFormatacao}`);
+      }
       onExportado?.();
     },
     onError: (e: Error) => toast.error(e.message),
