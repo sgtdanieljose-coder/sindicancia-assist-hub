@@ -81,6 +81,10 @@ export const SHEET_TAB = "Sindicancias";
 export const BRASAO_URL =
   "https://sindicancia-assist-hub.lovable.app/__l5e/assets-v1/f23d5d02-916f-4e73-809c-9fe4c6876f2e/brasao-republica.png";
 
+/** URL pública do carimbo de paginação aplicado a cada folha do documento único dos autos. */
+export const CARIMBO_URL =
+  "https://sindicancia-assist-hub.lovable.app/__l5e/assets-v1/9928ead0-897e-4ecf-b986-7b3ec13979cc/carimbo-paginacao.png";
+
 export const HEADERS = [
   "id",
   "nup",
@@ -302,6 +306,44 @@ async function inserirBrasao(documentId: string, index = 1) {
     console.warn("Não foi possível inserir o brasão no documento:", e);
   }
 }
+
+/**
+ * Insere o carimbo de paginação (imagem) imediatamente antes do marcador "Fls. N" da folha,
+ * alinhado à direita. Chamado a cada reconstrução dos autos, de modo que a numeração se
+ * reajusta sozinha quando uma peça nova entra em qualquer página. Best-effort.
+ */
+async function inserirCarimbo(documentId: string, index: number) {
+  try {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: {
+        requests: [
+          {
+            insertInlineImage: {
+              location: { index },
+              uri: CARIMBO_URL,
+              objectSize: {
+                height: { magnitude: 78, unit: "PT" },
+                width: { magnitude: 78, unit: "PT" },
+              },
+            },
+          },
+          {
+            updateParagraphStyle: {
+              range: { startIndex: index, endIndex: index + 1 },
+              paragraphStyle: { alignment: "END" },
+              fields: "alignment",
+            },
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    console.warn("Não foi possível inserir o carimbo de paginação:", e);
+  }
+}
+
+
 
 /** Cria um Google Doc com brasão + texto e devolve id/url. */
 export async function createDoc(title: string, content: string, pastaId?: string) {
@@ -698,8 +740,10 @@ export async function rebuildAutos(
   });
 
   // 3) Quebra de página de verdade (não caractere de texto) + brasão no início de cada peça —
-  //    sempre em página própria. De trás para frente: como cada peça só mexe em índices a
-  //    partir do próprio início, os índices das peças anteriores continuam válidos.
+  //    sempre em página própria — e o carimbo de paginação colado ao marcador "Fls. N". Como
+  //    isso roda a cada reconstrução, a numeração carimbada se reajusta sozinha quando uma
+  //    peça nova é inserida em qualquer página. De trás para frente: como cada peça só mexe em
+  //    índices a partir do próprio início, os índices das peças anteriores continuam válidos.
   for (let i = pecas.length - 1; i >= 0; i--) {
     if (i > 0) {
       await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
@@ -707,10 +751,14 @@ export async function rebuildAutos(
         body: { requests: [{ insertPageBreak: { location: { index: inicios[i] } } }] },
       });
       await inserirBrasao(documentId, inicios[i] + 1);
+      // +1 quebra de página, +1 brasão, +1 "\n" que antecede o marcador.
+      await inserirCarimbo(documentId, inicios[i] + 3);
     } else {
       await inserirBrasao(documentId, inicios[i]);
+      await inserirCarimbo(documentId, inicios[i] + 2);
     }
   }
+
 
   // 4) Reaplica, sobre o documento já paginado, a MESMA formatação usada em cada documento
   //    individual (gruposFormatacaoPeca) — localizando cada peça pelo marcador "Fls. N", já
@@ -719,7 +767,9 @@ export async function rebuildAutos(
   //    malformado não derrube a formatação das demais peças.
   const paragrafos = await listarParagrafos(documentId);
   const marcadores = paragrafos
-    .map((p, idx) => ({ idx, texto: p.texto.replace(/\n$/, "").trim() }))
+    // O parágrafo do marcador agora também contém a imagem do carimbo, que aparece como
+    // caractere de objeto — remove antes de comparar.
+    .map((p, idx) => ({ idx, texto: p.texto.replace(/[\uE000-\uF8FF\uFFFC\n]/g, "").trim() }))
     .filter((m) => /^Fls\.\s*\d+$/.test(m.texto));
 
   const gruposPorNome = new Map<string, unknown[]>();
