@@ -71,8 +71,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       arquivoAtivo,
       rebuildAutos,
       getDocText,
-      formatarCapaAutos,
-      formatarTermoAbertura,
+      formatarPecaBasica,
     } = await import("./google.server");
 
     const { atual, linha } = await carregar(data.sindicanciaId);
@@ -138,19 +137,13 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     }
     atual.documentos = lista;
 
-    // Formatação especial (negrito/centralização/sublinhado) de peças com layout próprio.
-    if (data.pecaId === "autos") {
-      try {
-        await formatarCapaAutos(doc.documentId);
-      } catch (e) {
-        console.warn("Falha ao formatar a Capa dos Autos:", e);
-      }
-    } else if (data.pecaId === "abertura") {
-      try {
-        await formatarTermoAbertura(doc.documentId);
-      } catch (e) {
-        console.warn("Falha ao formatar o Termo de Abertura:", e);
-      }
+    // Formatação-base (cabeçalho/título/assinatura) — mesma lógica usada no consolidado.
+    let avisoFormatacao: string | undefined;
+    try {
+      await formatarPecaBasica(doc.documentId, data.pecaId);
+    } catch (e) {
+      console.warn("Falha ao formatar a peça:", e);
+      avisoFormatacao = e instanceof Error ? e.message : "Falha desconhecida ao formatar a peça.";
     }
 
     // Marca automaticamente a etapa correspondente no checklist, se ainda não estiver marcada.
@@ -166,12 +159,12 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       atual.autosUrl = autos.url;
       autosUrl = autos.url;
 
-      const pecas: { titulo: string; texto: string }[] = [];
+      const pecas: { pecaId?: string; titulo: string; texto: string }[] = [];
       for (const d of lista) {
         if (d.documentId === doc.documentId) {
-          pecas.push({ titulo: d.titulo, texto: data.conteudo });
+          pecas.push({ pecaId: d.pecaId, titulo: d.titulo, texto: data.conteudo });
         } else {
-          pecas.push({ titulo: d.titulo, texto: await getDocText(d.documentId) });
+          pecas.push({ pecaId: d.pecaId, titulo: d.titulo, texto: await getDocText(d.documentId) });
         }
       }
       await rebuildAutos(autos.documentId, pecas);
@@ -191,6 +184,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       autosUrl,
       atualizado: Boolean(existenteAtivo),
       recriado: Boolean(existenteBruto) && !existenteAtivo,
+      avisoFormatacao,
     };
   });
 
