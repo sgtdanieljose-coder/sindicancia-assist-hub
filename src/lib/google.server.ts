@@ -445,9 +445,93 @@ export async function formatarCapaAutos(documentId: string) {
 }
 
 /**
- * Substitui o conteúdo de um Google Doc já existente (apaga o corpo e reinsere o texto + brasão),
- * usado para reexportar peças "únicas" sem criar um documento duplicado a cada ajuste.
+ * Formata o Termo de Abertura: cabeçalho institucional e título "TERMO DE ABERTURA" em
+ * negrito/centralizado (título também sublinhado, como na Capa), corpo do texto justificado
+ * com recuo de primeira linha, e a assinatura (últimos dois parágrafos) centralizada.
  */
+export async function formatarTermoAbertura(documentId: string) {
+  const paragrafos = (await listarParagrafos(documentId)).filter((p) => p.texto.trim());
+  const requests: unknown[] = [];
+  let noCabecalho = true;
+
+  paragrafos.forEach((p, i) => {
+    const texto = p.texto.replace(/\n$/, "");
+    const conteudo = texto.trim();
+    const inicio = p.startIndex;
+    const fim = p.startIndex + texto.length;
+    const naAssinatura = i >= paragrafos.length - 2;
+
+    if (conteudo === "TERMO DE ABERTURA") {
+      noCabecalho = false;
+      requests.push(
+        {
+          updateTextStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            textStyle: { bold: true, underline: true },
+            fields: "bold,underline",
+          },
+        },
+        {
+          updateParagraphStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            paragraphStyle: { alignment: "CENTER" },
+            fields: "alignment",
+          },
+        },
+      );
+      return;
+    }
+
+    if (noCabecalho) {
+      requests.push(
+        {
+          updateTextStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            textStyle: { bold: true },
+            fields: "bold",
+          },
+        },
+        {
+          updateParagraphStyle: {
+            range: { startIndex: inicio, endIndex: fim },
+            paragraphStyle: { alignment: "CENTER" },
+            fields: "alignment",
+          },
+        },
+      );
+      return;
+    }
+
+    if (naAssinatura) {
+      requests.push({
+        updateParagraphStyle: {
+          range: { startIndex: inicio, endIndex: fim },
+          paragraphStyle: { alignment: "CENTER" },
+          fields: "alignment",
+        },
+      });
+      return;
+    }
+
+    requests.push({
+      updateParagraphStyle: {
+        range: { startIndex: inicio, endIndex: fim },
+        paragraphStyle: {
+          alignment: "JUSTIFIED",
+          indentFirstLine: { magnitude: 36, unit: "PT" },
+        },
+        fields: "alignment,indentFirstLine",
+      },
+    });
+  });
+
+  if (requests.length) {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests },
+    });
+  }
+}
 export async function updateDocContent(documentId: string, content: string) {
   const doc = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
     "google_docs",
