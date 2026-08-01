@@ -81,6 +81,10 @@ export const SHEET_TAB = "Sindicancias";
 export const BRASAO_URL =
   "https://sindicancia-assist-hub.lovable.app/__l5e/assets-v1/f23d5d02-916f-4e73-809c-9fe4c6876f2e/brasao-republica.png";
 
+/** URL pública do carimbo de paginação aplicado a cada folha do documento único dos autos. */
+export const CARIMBO_URL =
+  "https://sindicancia-assist-hub.lovable.app/__l5e/assets-v1/9928ead0-897e-4ecf-b986-7b3ec13979cc/carimbo-paginacao.png";
+
 export const HEADERS = [
   "id",
   "nup",
