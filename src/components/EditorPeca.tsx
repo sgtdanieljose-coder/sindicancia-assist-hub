@@ -84,7 +84,9 @@ export function EditorPeca({
       toast.success(
         d.atualizado
           ? `Peça atualizada (Fls. ${d.posicao}) — documento individual e autos sincronizados`
-          : `Peça salva individualmente e inserida na página ${d.posicao} dos autos`,
+          : d.recriado
+            ? `O documento anterior não foi encontrado no Drive — recriado na Fls. ${d.posicao}`
+            : `Peça salva individualmente e inserida na página ${d.posicao} dos autos`,
       );
       onExportado?.();
     },
