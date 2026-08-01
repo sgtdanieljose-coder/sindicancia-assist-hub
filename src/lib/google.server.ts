@@ -378,7 +378,7 @@ async function listarParagrafos(documentId: string): Promise<Paragrafo[]> {
 
 // ====================================================================================
 // Formatação-base de toda peça (documento individual E a cópia dela dentro do
-// documento único dos autos — ver requestsFormatacaoPeca/rebuildAutos abaixo, que usam
+// documento único dos autos — ver gruposFormatacaoPeca/rebuildAutos abaixo, que usam
 // exatamente a mesma lógica nos dois lugares, para nunca ficarem dessincronizados):
 //
 //   1) Brasão da República no topo (inserido separadamente por inserirBrasao).
@@ -552,32 +552,55 @@ function requestsRotulosCapa(paragrafos: Paragrafo[]): unknown[] {
 
 /** Compõe todos os passos acima para uma peça específica — a MESMA função usada tanto para
  *  o documento individual quanto para o trecho correspondente dentro do consolidado. */
-function requestsFormatacaoPeca(paragrafos: Paragrafo[], pecaId?: string): unknown[] {
+type GrupoFormatacao = { nome: string; requests: unknown[] };
+
+/** Mesmos passos de sempre, mas em grupos nomeados — cada grupo vira uma chamada separada à
+ *  API (ver formatarPecaBasica/rebuildAutos), então um pedaço malformado não derruba os outros. */
+function gruposFormatacaoPeca(paragrafos: Paragrafo[], pecaId?: string): GrupoFormatacao[] {
   if (!pecaId) return [];
   const titulo = TITULOS_PECA[pecaId];
-  const requests: unknown[] = [];
+  const grupos: GrupoFormatacao[] = [];
+
   if (titulo) {
-    requests.push(...requestsCabecalhoTitulo(paragrafos, titulo));
-    if (pecaId !== "autos") requests.push(...requestsCorpoJustificado(paragrafos, titulo));
+    grupos.push({
+      nome: "cabeçalho/título",
+      requests: requestsCabecalhoTitulo(paragrafos, titulo),
+    });
+    if (pecaId !== "autos") {
+      grupos.push({
+        nome: "corpo justificado",
+        requests: requestsCorpoJustificado(paragrafos, titulo),
+      });
+    }
   }
   if (pecaId === "autos") {
-    requests.push(...requestsRotulosCapa(paragrafos));
+    grupos.push({ nome: "rótulos da capa", requests: requestsRotulosCapa(paragrafos) });
   } else {
-    requests.push(...requestsAssinatura(paragrafos));
+    grupos.push({ nome: "assinatura", requests: requestsAssinatura(paragrafos) });
   }
-  return requests;
+  return grupos.filter((g) => g.requests.length);
 }
 
-/** Aplica a formatação-base (ver comentário acima) ao documento individual de uma peça. */
+/** Aplica a formatação-base (ver comentário acima) ao documento individual de uma peça, um
+ *  grupo por vez. Se algum grupo falhar, os demais ainda são aplicados; ao final, lança um
+ *  erro descrevendo exatamente quais grupos falharam (para diagnóstico, em vez de silêncio). */
 export async function formatarPecaBasica(documentId: string, pecaId?: string) {
   const paragrafos = await listarParagrafos(documentId);
-  const requests = requestsFormatacaoPeca(paragrafos, pecaId);
-  if (requests.length) {
-    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
-      method: "POST",
-      body: { requests },
-    });
+  const grupos = gruposFormatacaoPeca(paragrafos, pecaId);
+  const erros: string[] = [];
+
+  for (const g of grupos) {
+    try {
+      await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+        method: "POST",
+        body: { requests: g.requests },
+      });
+    } catch (e) {
+      erros.push(`${g.nome}: ${e instanceof Error ? e.message : "falha desconhecida"}`);
+    }
   }
+
+  if (erros.length) throw new Error(erros.join(" | "));
 }
 
 export async function updateDocContent(documentId: string, content: string) {
@@ -638,7 +661,7 @@ export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?:
  * Reescreve o documento único dos autos com as peças na ordem informada, numerando as
  * folhas ("Fls. N"), sempre em página própria (quebra de página de verdade, não um simples
  * caractere de texto), com o brasão no início de cada uma, e reaplicando a MESMA formatação
- * usada no documento individual de cada peça — ver requestsFormatacaoPeca.
+ * usada no documento individual de cada peça — ver gruposFormatacaoPeca.
  */
 export async function rebuildAutos(
   documentId: string,
@@ -690,24 +713,33 @@ export async function rebuildAutos(
   }
 
   // 4) Reaplica, sobre o documento já paginado, a MESMA formatação usada em cada documento
-  //    individual (requestsFormatacaoPeca) — localizando cada peça pelo marcador "Fls. N",
-  //    já que os índices calculados antes das quebras de página não valem mais depois delas.
+  //    individual (gruposFormatacaoPeca) — localizando cada peça pelo marcador "Fls. N", já
+  //    que os índices calculados antes das quebras de página não valem mais depois delas.
+  //    Agrupado por nome (uma chamada por grupo, juntando todas as peças) para que um grupo
+  //    malformado não derrube a formatação das demais peças.
   const paragrafos = await listarParagrafos(documentId);
   const marcadores = paragrafos
     .map((p, idx) => ({ idx, texto: p.texto.replace(/\n$/, "").trim() }))
     .filter((m) => /^Fls\.\s*\d+$/.test(m.texto));
 
-  const requests: unknown[] = [];
+  const gruposPorNome = new Map<string, unknown[]>();
   marcadores.forEach((m, i) => {
     const fimIdx = i + 1 < marcadores.length ? marcadores[i + 1].idx : paragrafos.length;
     const doSegmento = paragrafos.slice(m.idx + 1, fimIdx);
-    requests.push(...requestsFormatacaoPeca(doSegmento, pecas[i]?.pecaId));
+    for (const g of gruposFormatacaoPeca(doSegmento, pecas[i]?.pecaId)) {
+      gruposPorNome.set(g.nome, [...(gruposPorNome.get(g.nome) ?? []), ...g.requests]);
+    }
   });
-  if (requests.length) {
-    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
-      method: "POST",
-      body: { requests },
-    });
+
+  for (const [nome, requests] of gruposPorNome) {
+    try {
+      await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+        method: "POST",
+        body: { requests },
+      });
+    } catch (e) {
+      console.warn(`Falha ao formatar "${nome}" no documento consolidado:`, e);
+    }
   }
 }
 
