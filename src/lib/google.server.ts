@@ -376,29 +376,55 @@ async function listarParagrafos(documentId: string): Promise<Paragrafo[]> {
   return paragrafos;
 }
 
+// ====================================================================================
+// Formatação-base de toda peça (documento individual E a cópia dela dentro do
+// documento único dos autos — ver requestsFormatacaoPeca/rebuildAutos abaixo, que usam
+// exatamente a mesma lógica nos dois lugares, para nunca ficarem dessincronizados):
+//
+//   1) Brasão da República no topo (inserido separadamente por inserirBrasao).
+//   2) Cabeçalho institucional (timbre / Subordinação) em negrito e centralizado.
+//   3) 4 linhas em branco entre o cabeçalho e o título da peça (ver ESPACO_ANTES_TITULO
+//      em pecas.ts, usado ao gerar o texto).
+//   4) Título da peça em negrito, sublinhado e centralizado.
+//   5) Corpo do texto (peças com um parágrafo narrativo) justificado, com recuo na
+//      primeira linha.
+//   6) Assinatura ao final: nome centralizado em peso normal, e a função/cargo
+//      (ex.: "Sindicante") centralizada e em negrito — sempre os dois últimos
+//      parágrafos não vazios, já que toda peça (exceto a Capa) termina com assinatura(s).
+//
+// Reconhecida pelo TEXTO já inserido (não por posição fixa), então sobrevive a ajustes
+// que o usuário faça na minuta antes de exportar.
+//
+// Para estender a uma peça nova: basta cadastrar o título literal dela em TITULOS_PECA
+// — o resto (negrito/centralização/sublinhado/justificado/assinatura) é automático a
+// partir daí, tanto no documento individual quanto no consolidado.
+// ====================================================================================
+
+/** Título literal (linha exata no corpo do texto) de cada peça que já segue a convenção acima. */
+const TITULOS_PECA: Partial<Record<string, string>> = {
+  autos: "AUTOS DE SINDICÂNCIA",
+  abertura: "TERMO DE ABERTURA",
+  juntada: "JUNTADA",
+};
+
 const ROTULOS_CAPA = ["NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:"];
 
-/**
- * Formata a Capa dos Autos de Sindicância já exportada: cabeçalho institucional em negrito e
- * centralizado, título "AUTOS DE SINDICÂNCIA" em negrito, sublinhado e centralizado, e os
- * rótulos NUP/SINDICANTE/SINDICADO/OBJETO em negrito (mantendo o valor em texto normal).
- * Reconhece os trechos pelo padrão do texto já inserido — funciona mesmo se o usuário tiver
- * ajustado palavras no meio do caminho, desde que o título e os rótulos permaneçam intactos.
- */
-export async function formatarCapaAutos(documentId: string) {
-  const paragrafos = await listarParagrafos(documentId);
+/** Cabeçalho (tudo antes do título) em negrito+centralizado; título em negrito+sublinhado+
+ *  centralizado. Não faz nada se o título não for encontrado (evita negritar o documento
+ *  inteiro por engano quando a peça ainda não tem uma convenção de título cadastrada). */
+function requestsCabecalhoTitulo(paragrafos: Paragrafo[], titulo: string): unknown[] {
+  if (!paragrafos.some((p) => p.texto.replace(/\n$/, "").trim() === titulo)) return [];
+
   const requests: unknown[] = [];
   let noCabecalho = true;
-
   for (const p of paragrafos) {
     const texto = p.texto.replace(/\n$/, "");
     const conteudo = texto.trim();
     if (!conteudo) continue;
-
     const inicio = p.startIndex;
     const fim = p.startIndex + texto.length;
 
-    if (conteudo === "AUTOS DE SINDICÂNCIA") {
+    if (conteudo === titulo) {
       noCabecalho = false;
       requests.push(
         {
@@ -436,112 +462,116 @@ export async function formatarCapaAutos(documentId: string) {
           },
         },
       );
-      continue;
-    }
-
-    const rotulo = ROTULOS_CAPA.find((r) => conteudo.startsWith(r));
-    if (rotulo) {
-      const recuo = texto.length - texto.trimStart().length;
-      const inicioRotulo = inicio + recuo;
-      requests.push({
-        updateTextStyle: {
-          range: { startIndex: inicioRotulo, endIndex: inicioRotulo + rotulo.length },
-          textStyle: { bold: true },
-          fields: "bold",
-        },
-      });
     }
   }
-
-  if (requests.length) {
-    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
-      method: "POST",
-      body: { requests },
-    });
-  }
+  return requests;
 }
 
-/**
- * Formata o Termo de Abertura: cabeçalho institucional e título "TERMO DE ABERTURA" em
- * negrito/centralizado (título também sublinhado, como na Capa), corpo do texto justificado
- * com recuo de primeira linha, e a assinatura (últimos dois parágrafos) centralizada.
- */
-export async function formatarTermoAbertura(documentId: string) {
-  const paragrafos = (await listarParagrafos(documentId)).filter((p) => p.texto.trim());
-  const requests: unknown[] = [];
-  let noCabecalho = true;
+/** Parágrafos entre o título e os dois últimos (a assinatura) justificados, com recuo de
+ *  primeira linha — o corpo narrativo da peça. */
+function requestsCorpoJustificado(paragrafos: Paragrafo[], titulo: string): unknown[] {
+  const naoVazios = paragrafos.filter((p) => p.texto.trim());
+  const idxTitulo = naoVazios.findIndex((p) => p.texto.replace(/\n$/, "").trim() === titulo);
+  if (idxTitulo < 0) return [];
 
-  paragrafos.forEach((p, i) => {
+  const requests: unknown[] = [];
+  for (let i = idxTitulo + 1; i < naoVazios.length - 2; i++) {
+    const texto = naoVazios[i].texto.replace(/\n$/, "");
+    requests.push({
+      updateParagraphStyle: {
+        range: {
+          startIndex: naoVazios[i].startIndex,
+          endIndex: naoVazios[i].startIndex + texto.length,
+        },
+        paragraphStyle: { alignment: "JUSTIFIED", indentFirstLine: { magnitude: 36, unit: "PT" } },
+        fields: "alignment,indentFirstLine",
+      },
+    });
+  }
+  return requests;
+}
+
+/** Assinatura final: sempre os dois últimos parágrafos não vazios — nome centralizado (peso
+ *  normal) e função/cargo (última linha) centralizada e em negrito. Não usar na Capa, que
+ *  não tem assinatura. */
+function requestsAssinatura(paragrafos: Paragrafo[]): unknown[] {
+  const naoVazios = paragrafos.filter((p) => p.texto.trim());
+  if (naoVazios.length < 2) return [];
+
+  const requests: unknown[] = [];
+  naoVazios.slice(-2).forEach((p, i) => {
     const texto = p.texto.replace(/\n$/, "");
-    const conteudo = texto.trim();
     const inicio = p.startIndex;
     const fim = p.startIndex + texto.length;
-    const naAssinatura = i >= paragrafos.length - 2;
-
-    if (conteudo === "TERMO DE ABERTURA") {
-      noCabecalho = false;
-      requests.push(
-        {
-          updateTextStyle: {
-            range: { startIndex: inicio, endIndex: fim },
-            textStyle: { bold: true, underline: true },
-            fields: "bold,underline",
-          },
-        },
-        {
-          updateParagraphStyle: {
-            range: { startIndex: inicio, endIndex: fim },
-            paragraphStyle: { alignment: "CENTER" },
-            fields: "alignment",
-          },
-        },
-      );
-      return;
-    }
-
-    if (noCabecalho) {
-      requests.push(
-        {
-          updateTextStyle: {
-            range: { startIndex: inicio, endIndex: fim },
-            textStyle: { bold: true },
-            fields: "bold",
-          },
-        },
-        {
-          updateParagraphStyle: {
-            range: { startIndex: inicio, endIndex: fim },
-            paragraphStyle: { alignment: "CENTER" },
-            fields: "alignment",
-          },
-        },
-      );
-      return;
-    }
-
-    if (naAssinatura) {
-      requests.push({
+    const ehFuncao = i === 1;
+    requests.push(
+      {
         updateParagraphStyle: {
           range: { startIndex: inicio, endIndex: fim },
           paragraphStyle: { alignment: "CENTER" },
           fields: "alignment",
         },
-      });
-      return;
-    }
+      },
+      ...(ehFuncao
+        ? [
+            {
+              updateTextStyle: {
+                range: { startIndex: inicio, endIndex: fim },
+                textStyle: { bold: true },
+                fields: "bold",
+              },
+            },
+          ]
+        : []),
+    );
+  });
+  return requests;
+}
 
+/** Rótulos NUP:/SINDICANTE:/SINDICADO:/OBJETO: em negrito (mantendo o valor em texto normal) —
+ *  específico da Capa dos Autos, que não segue o padrão corpo+assinatura das demais peças. */
+function requestsRotulosCapa(paragrafos: Paragrafo[]): unknown[] {
+  const requests: unknown[] = [];
+  for (const p of paragrafos) {
+    const texto = p.texto.replace(/\n$/, "");
+    const conteudo = texto.trim();
+    const rotulo = ROTULOS_CAPA.find((r) => conteudo.startsWith(r));
+    if (!rotulo) continue;
+    const recuo = texto.length - texto.trimStart().length;
+    const inicioRotulo = p.startIndex + recuo;
     requests.push({
-      updateParagraphStyle: {
-        range: { startIndex: inicio, endIndex: fim },
-        paragraphStyle: {
-          alignment: "JUSTIFIED",
-          indentFirstLine: { magnitude: 36, unit: "PT" },
-        },
-        fields: "alignment,indentFirstLine",
+      updateTextStyle: {
+        range: { startIndex: inicioRotulo, endIndex: inicioRotulo + rotulo.length },
+        textStyle: { bold: true },
+        fields: "bold",
       },
     });
-  });
+  }
+  return requests;
+}
 
+/** Compõe todos os passos acima para uma peça específica — a MESMA função usada tanto para
+ *  o documento individual quanto para o trecho correspondente dentro do consolidado. */
+function requestsFormatacaoPeca(paragrafos: Paragrafo[], pecaId?: string): unknown[] {
+  if (!pecaId) return [];
+  const titulo = TITULOS_PECA[pecaId];
+  const requests: unknown[] = [];
+  if (titulo) {
+    requests.push(...requestsCabecalhoTitulo(paragrafos, titulo));
+    if (pecaId !== "autos") requests.push(...requestsCorpoJustificado(paragrafos, titulo));
+  }
+  if (pecaId === "autos") {
+    requests.push(...requestsRotulosCapa(paragrafos));
+  } else {
+    requests.push(...requestsAssinatura(paragrafos));
+  }
+  return requests;
+}
+
+/** Aplica a formatação-base (ver comentário acima) ao documento individual de uma peça. */
+export async function formatarPecaBasica(documentId: string, pecaId?: string) {
+  const paragrafos = await listarParagrafos(documentId);
+  const requests = requestsFormatacaoPeca(paragrafos, pecaId);
   if (requests.length) {
     await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
       method: "POST",
@@ -549,6 +579,7 @@ export async function formatarTermoAbertura(documentId: string) {
     });
   }
 }
+
 export async function updateDocContent(documentId: string, content: string) {
   const doc = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
     "google_docs",
@@ -604,10 +635,15 @@ export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?:
 }
 
 /**
- * Reescreve o documento único dos autos com as peças na ordem informada,
- * numerando as folhas ("Fls. N") e separando cada peça por quebra de página.
+ * Reescreve o documento único dos autos com as peças na ordem informada, numerando as
+ * folhas ("Fls. N"), sempre em página própria (quebra de página de verdade, não um simples
+ * caractere de texto), com o brasão no início de cada uma, e reaplicando a MESMA formatação
+ * usada no documento individual de cada peça — ver requestsFormatacaoPeca.
  */
-export async function rebuildAutos(documentId: string, pecas: { titulo: string; texto: string }[]) {
+export async function rebuildAutos(
+  documentId: string,
+  pecas: { pecaId?: string; titulo: string; texto: string }[],
+) {
   // 1) Limpa o conteúdo atual.
   const atual = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
     "google_docs",
@@ -623,25 +659,55 @@ export async function rebuildAutos(documentId: string, pecas: { titulo: string; 
       },
     });
   }
+  if (!pecas.length) return;
 
-  // 2) Monta o texto completo, guardando o offset de início de cada peça (para o brasão).
+  // 2) Monta o texto completo, guardando o índice de início de cada peça.
   let texto = "";
-  const offsets: number[] = [];
+  const inicios: number[] = [];
   pecas.forEach((p, i) => {
-    offsets.push(1 + texto.length);
+    inicios.push(1 + texto.length);
     texto += `\nFls. ${i + 1}\n\n${p.texto.trim()}\n`;
-    if (i < pecas.length - 1) texto += "\f";
   });
-  if (!texto) return;
 
   await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
     method: "POST",
     body: { requests: [{ insertText: { location: { index: 1 }, text: texto } }] },
   });
 
-  // 3) Insere o brasão no início de cada peça, de trás para frente (índices não se deslocam).
-  for (const off of [...offsets].reverse()) {
-    await inserirBrasao(documentId, off);
+  // 3) Quebra de página de verdade (não caractere de texto) + brasão no início de cada peça —
+  //    sempre em página própria. De trás para frente: como cada peça só mexe em índices a
+  //    partir do próprio início, os índices das peças anteriores continuam válidos.
+  for (let i = pecas.length - 1; i >= 0; i--) {
+    if (i > 0) {
+      await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+        method: "POST",
+        body: { requests: [{ insertPageBreak: { location: { index: inicios[i] } } }] },
+      });
+      await inserirBrasao(documentId, inicios[i] + 1);
+    } else {
+      await inserirBrasao(documentId, inicios[i]);
+    }
+  }
+
+  // 4) Reaplica, sobre o documento já paginado, a MESMA formatação usada em cada documento
+  //    individual (requestsFormatacaoPeca) — localizando cada peça pelo marcador "Fls. N",
+  //    já que os índices calculados antes das quebras de página não valem mais depois delas.
+  const paragrafos = await listarParagrafos(documentId);
+  const marcadores = paragrafos
+    .map((p, idx) => ({ idx, texto: p.texto.replace(/\n$/, "").trim() }))
+    .filter((m) => /^Fls\.\s*\d+$/.test(m.texto));
+
+  const requests: unknown[] = [];
+  marcadores.forEach((m, i) => {
+    const fimIdx = i + 1 < marcadores.length ? marcadores[i + 1].idx : paragrafos.length;
+    const doSegmento = paragrafos.slice(m.idx + 1, fimIdx);
+    requests.push(...requestsFormatacaoPeca(doSegmento, pecas[i]?.pecaId));
+  });
+  if (requests.length) {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests },
+    });
   }
 }
 
