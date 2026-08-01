@@ -740,8 +740,10 @@ export async function rebuildAutos(
   });
 
   // 3) Quebra de página de verdade (não caractere de texto) + brasão no início de cada peça —
-  //    sempre em página própria. De trás para frente: como cada peça só mexe em índices a
-  //    partir do próprio início, os índices das peças anteriores continuam válidos.
+  //    sempre em página própria — e o carimbo de paginação colado ao marcador "Fls. N". Como
+  //    isso roda a cada reconstrução, a numeração carimbada se reajusta sozinha quando uma
+  //    peça nova é inserida em qualquer página. De trás para frente: como cada peça só mexe em
+  //    índices a partir do próprio início, os índices das peças anteriores continuam válidos.
   for (let i = pecas.length - 1; i >= 0; i--) {
     if (i > 0) {
       await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
@@ -749,10 +751,14 @@ export async function rebuildAutos(
         body: { requests: [{ insertPageBreak: { location: { index: inicios[i] } } }] },
       });
       await inserirBrasao(documentId, inicios[i] + 1);
+      // +1 quebra de página, +1 brasão, +1 "\n" que antecede o marcador.
+      await inserirCarimbo(documentId, inicios[i] + 3);
     } else {
       await inserirBrasao(documentId, inicios[i]);
+      await inserirCarimbo(documentId, inicios[i] + 2);
     }
   }
+
 
   // 4) Reaplica, sobre o documento já paginado, a MESMA formatação usada em cada documento
   //    individual (gruposFormatacaoPeca) — localizando cada peça pelo marcador "Fls. N", já
