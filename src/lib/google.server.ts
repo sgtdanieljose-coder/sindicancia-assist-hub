@@ -767,7 +767,9 @@ export async function rebuildAutos(
   //    malformado não derrube a formatação das demais peças.
   const paragrafos = await listarParagrafos(documentId);
   const marcadores = paragrafos
-    .map((p, idx) => ({ idx, texto: p.texto.replace(/\n$/, "").trim() }))
+    // O parágrafo do marcador agora também contém a imagem do carimbo, que aparece como
+    // caractere de objeto — remove antes de comparar.
+    .map((p, idx) => ({ idx, texto: p.texto.replace(/[\uE000-\uF8FF\uFFFC\n]/g, "").trim() }))
     .filter((m) => /^Fls\.\s*\d+$/.test(m.texto));
 
   const gruposPorNome = new Map<string, unknown[]>();
