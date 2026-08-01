@@ -307,6 +307,44 @@ async function inserirBrasao(documentId: string, index = 1) {
   }
 }
 
+/**
+ * Insere o carimbo de paginação (imagem) imediatamente antes do marcador "Fls. N" da folha,
+ * alinhado à direita. Chamado a cada reconstrução dos autos, de modo que a numeração se
+ * reajusta sozinha quando uma peça nova entra em qualquer página. Best-effort.
+ */
+async function inserirCarimbo(documentId: string, index: number) {
+  try {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: {
+        requests: [
+          {
+            insertInlineImage: {
+              location: { index },
+              uri: CARIMBO_URL,
+              objectSize: {
+                height: { magnitude: 78, unit: "PT" },
+                width: { magnitude: 78, unit: "PT" },
+              },
+            },
+          },
+          {
+            updateParagraphStyle: {
+              range: { startIndex: index, endIndex: index + 1 },
+              paragraphStyle: { alignment: "END" },
+              fields: "alignment",
+            },
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    console.warn("Não foi possível inserir o carimbo de paginação:", e);
+  }
+}
+
+
+
 /** Cria um Google Doc com brasão + texto e devolve id/url. */
 export async function createDoc(title: string, content: string, pastaId?: string) {
   const doc = await gw<{ documentId: string }>("google_docs", "/v1/documents", {
