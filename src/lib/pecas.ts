@@ -1,8 +1,15 @@
 export type AnexoJuntada = {
-  nome: string;
-  fileId: string;
-  url: string;
-  mimeType: string;
+  id: string;
+  /** Texto digitado livremente — pode ter vírgula, dois-pontos etc., ao contrário do nome do arquivo. */
+  descricao: string;
+  /** Presentes só quando um arquivo foi anexado a este item. */
+  fileId?: string;
+  url?: string;
+  mimeType?: string;
+  nomeArquivo?: string;
+  /** Documento (folha própria) deste anexo específico, se houver arquivo. */
+  documentId?: string;
+  docUrl?: string;
 };
 
 export type Juntada = {
@@ -469,8 +476,8 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
   const titulo = `JUNTADA Nº ${j.numero}`;
   const listaAnexos = j.anexos.length
-    ? j.anexos.map((a, i) => `${i + 1}. ${a.nome}`).join("\n\n")
-    : "(nenhum documento anexado até o momento)";
+    ? j.anexos.map((a, i) => `${i + 1}. ${a.descricao}`).join("\n\n")
+    : "(nenhum item juntado até o momento)";
 
   const corpo = [
     ...ESPACO_ANTES_TITULO,
