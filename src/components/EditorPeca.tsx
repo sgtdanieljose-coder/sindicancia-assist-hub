@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { exportarParaDocs } from "@/lib/sindicancias.functions";
+import { desfazerInsercao, exportarParaDocs } from "@/lib/sindicancias.functions";
 
 type Props = {
   titulo: string;

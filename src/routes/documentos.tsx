@@ -218,7 +218,7 @@ function Documentos() {
                         rel="noreferrer"
                         className="hover:text-primary"
                       >
-                        {a.nome}
+                        {a.descricao || a.nomeArquivo}
                       </a>
                     </li>
                   ))}

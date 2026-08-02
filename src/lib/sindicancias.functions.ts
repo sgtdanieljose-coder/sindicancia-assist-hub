@@ -1,5 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
-import { gerarTextoJuntada, type Juntada, type Sindicancia } from "./pecas";
+import {
+  gerarTextoJuntada,
+  type AnexoJuntada,
+  type Juntada,
+  type Sindicancia,
+} from "./pecas";
 import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
 import { carregar } from "./sindicancias.server";
 
@@ -18,7 +23,7 @@ async function sincronizarDocumentoJuntada(
     createDoc,
     updateDocContent,
     formatarPecaBasica,
-    inserirAnexosNaJuntada,
+    inserirAnexoNoFimDoDocumento,
     ensureAutosDoc,
     rebuildAutos,
     getDocText,
@@ -57,7 +62,15 @@ async function sincronizarDocumentoJuntada(
   }
 
   try {
-    await inserirAnexosNaJuntada(doc.documentId, juntada.anexos);
+for (const anexo of juntada.anexos) {
+      if (!anexo.fileId || !anexo.url) continue;
+      await inserirAnexoNoFimDoDocumento(doc.documentId, {
+        fileId: anexo.fileId,
+        url: anexo.url,
+        mimeType: anexo.mimeType,
+        nomeArquivo: anexo.nomeArquivo ?? anexo.descricao,
+      });
+    }
   } catch (e) {
     console.warn("Falha ao incorporar anexos na juntada:", e);
   }
@@ -72,7 +85,7 @@ async function sincronizarDocumentoJuntada(
       titulo: string;
       tituloInterno?: string;
       texto: string;
-      anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
+      anexos?: AnexoJuntada[];
     }[] = [];
     for (const d of atual.documentos) {
       const juntadaDoItem = d.pecaId?.startsWith("juntada-")
@@ -265,7 +278,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
         titulo: string;
         tituloInterno?: string;
         texto: string;
-        anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
+        anexos?: AnexoJuntada[];
       }[] = [];
       for (const d of lista) {
         const juntadaDoItem = d.pecaId?.startsWith("juntada-")
@@ -365,7 +378,22 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
     });
 
     atual.juntadas = (atual.juntadas ?? []).map((j) =>
-      j.id === data.juntadaId ? { ...j, anexos: [...j.anexos, arquivo] } : j,
+      j.id === data.juntadaId
+        ? {
+            ...j,
+            anexos: [
+              ...j.anexos,
+              {
+                id: `ANX-${Date.now()}`,
+                descricao: data.nome,
+                fileId: arquivo.fileId,
+                url: arquivo.url,
+                mimeType: arquivo.mimeType,
+                nomeArquivo: arquivo.nome,
+              } satisfies AnexoJuntada,
+            ],
+          }
+        : j,
     );
 
     atual = await sincronizarDocumentoJuntada(atual, data.juntadaId);
@@ -412,7 +440,7 @@ export const desfazerInsercao = createServerFn({ method: "POST" })
         titulo: string;
         tituloInterno?: string;
         texto: string;
-        anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
+        anexos?: AnexoJuntada[];
       }[] = [];
       for (const d of atual.documentos) {
         const juntadaDoItem = d.pecaId?.startsWith("juntada-")
