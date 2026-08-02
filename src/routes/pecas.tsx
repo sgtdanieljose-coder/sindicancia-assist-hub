@@ -199,18 +199,7 @@ function Pecas() {
               </>
             )}
 
-            {peca === "juntada" && (
-              <div className="space-y-1.5">
-                <Label>Documentos juntados</Label>
-                <Textarea
-                  className="min-h-28"
-                  value={campos.documentos}
-                  onChange={(e) => set("documentos", e.target.value)}
-                />
-              </div>
-            )}
-
-            {["oficio", "juntada", "encerramento", "prorrogacao"].includes(peca) && (
+            {["oficio", "encerramento", "prorrogacao"].includes(peca) && (
               <div className="space-y-1.5">
                 <Label>Justificativa / Finalidade</Label>
                 <Textarea
