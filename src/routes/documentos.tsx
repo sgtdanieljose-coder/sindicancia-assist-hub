@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { ExternalLink, FolderOpen, Loader2, Paperclip, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -23,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
-import { adicionarItemJuntada, criarJuntada } from "@/lib/sindicancias.functions";
+import { adicionarAnexo, criarJuntada } from "@/lib/sindicancias.functions";
 
 const PASTA_DRIVE = "https://drive.google.com/drive/folders/1zcQGM4T6-PAiEttCAdK6aqNBrUnQ-u6G";
 const PLANILHA =
@@ -63,7 +62,6 @@ function Documentos() {
   const [dialogo, setDialogo] = useState(false);
   const [juntadaId, setJuntadaId] = useState<string>("");
   const [novaJuntada, setNovaJuntada] = useState("");
-  const [descricao, setDescricao] = useState("");
   const [arquivo, setArquivo] = useState<File | null>(null);
 
   const juntadas = selecionada?.juntadas ?? [];
@@ -88,27 +86,21 @@ function Documentos() {
 
   const enviar = useMutation({
     mutationFn: async () => {
-      if (!descricao.trim()) throw new Error("Descreva o item juntado.");
+      if (!arquivo) throw new Error("Selecione um arquivo.");
       if (!juntadaId) throw new Error("Selecione ou crie uma juntada.");
-      const arquivoPayload = arquivo
-        ? {
-            nome: arquivo.name,
-            mimeType: arquivo.type || "application/octet-stream",
-            base64: await lerArquivo(arquivo),
-          }
-        : undefined;
-      return adicionarItemJuntada({
+      const base64 = await lerArquivo(arquivo);
+      return adicionarAnexo({
         data: {
           sindicanciaId: selecionada!.id,
           juntadaId,
-          descricao: descricao.trim(),
-          arquivo: arquivoPayload,
+          nome: arquivo.name,
+          mimeType: arquivo.type || "application/octet-stream",
+          base64,
         },
       });
     },
     onSuccess: () => {
-      toast.success("Item adicionado à juntada");
-      setDescricao("");
+      toast.success("Anexo enviado e vinculado à juntada");
       setArquivo(null);
       setDialogo(false);
       recarregar();
@@ -219,23 +211,19 @@ function Documentos() {
                 </p>
                 <ul className="space-y-0.5 pl-3">
                   {j.anexos.map((a) => (
-                    <li key={a.id} className="truncate text-sm text-muted-foreground">
-                      {a.docUrl ? (
-                        <a
-                          href={a.docUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:text-primary"
-                        >
-                          {a.descricao}
-                        </a>
-                      ) : (
-                        a.descricao
-                      )}
+                    <li key={a.fileId} className="truncate text-sm text-muted-foreground">
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-primary"
+                      >
+                        {a.descricao || a.nomeArquivo}
+                      </a>
                     </li>
                   ))}
                   {j.anexos.length === 0 && (
-                    <li className="text-xs text-muted-foreground">sem itens</li>
+                    <li className="text-xs text-muted-foreground">sem anexos</li>
                   )}
                 </ul>
               </div>
@@ -261,11 +249,10 @@ function Documentos() {
       <Dialog open={dialogo} onOpenChange={setDialogo}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Adicionar item à juntada</DialogTitle>
+            <DialogTitle>Adicionar anexo aos Autos</DialogTitle>
             <DialogDescription>
-              O item entra na lista numerada da juntada escolhida. Se você anexar um arquivo, ele é
-              enviado à pasta “Anexos” do NUP {selecionada?.nup || "—"} e ganha folha própria nos
-              autos.
+              O arquivo é enviado à pasta “Anexos” do NUP {selecionada?.nup || "—"} e fica vinculado
+              à juntada escolhida, preservando a ordem dos autos.
             </DialogDescription>
           </DialogHeader>
 
@@ -310,29 +297,14 @@ function Documentos() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Descrição do item</Label>
-              <Textarea
-                value={descricao}
-                onChange={(e) => setDescricao(e.target.value)}
-                placeholder="Ex.: Ofício nº 123, de 15 de julho de 2026: solicitação de documentos ao Sr. Fulano;"
-                className="min-h-20"
-              />
-              <p className="text-xs text-muted-foreground">
-                Texto livre — pode ter vírgula, dois-pontos etc. Vira o próximo item numerado da
-                juntada, independente do nome de um eventual arquivo anexado.
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Arquivo (opcional — foto ou PDF)</Label>
+              <Label>Arquivo (foto ou PDF)</Label>
               <Input
                 type="file"
                 accept="image/*,application/pdf"
                 onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
               />
               <p className="text-xs text-muted-foreground">
-                Se anexado, ganha folha própria nos autos: fotos ficam incorporadas; PDFs viram um
-                link clicável.
+                Fotos ficam incorporadas no texto da juntada; PDFs viram um link clicável.
               </p>
             </div>
           </div>
@@ -343,7 +315,7 @@ function Documentos() {
             </Button>
             <Button onClick={() => enviar.mutate()} disabled={enviar.isPending}>
               {enviar.isPending && <Loader2 className="size-4 animate-spin" />}
-              Adicionar item
+              Enviar anexo
             </Button>
           </DialogFooter>
         </DialogContent>

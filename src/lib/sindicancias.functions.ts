@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
-  cabecalho,
   gerarTextoJuntada,
   type AnexoJuntada,
   type Juntada,
@@ -9,49 +8,26 @@ import {
 import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
 import { carregar } from "./sindicancias.server";
 
-/** Reconstrói o documento único dos autos a partir de atual.documentos — compartilhado entre
- *  o fluxo normal de exportação de peças e o de juntadas/anexos, para nunca ficarem
- *  dessincronizados. `conteudoAtual` evita reler do Drive o documento que acabou de ser
- *  escrito (já temos o texto em mãos). */
-async function reconstruirAutos(
-  atual: Sindicancia,
-  doc: { documentId: string },
-  conteudoAtual: string,
-): Promise<Sindicancia> {
-  const { ensureAutosDoc, rebuildAutos, getDocText } = await import("./google.server");
-  try {
-    const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
-    atual.autosDocId = autos.documentId;
-    atual.autosUrl = autos.url;
-
-    const pecas: { pecaId?: string; titulo: string; tituloInterno?: string; texto: string }[] = [];
-    for (const d of atual.documentos) {
-      pecas.push({
-        pecaId: d.pecaId,
-        titulo: d.titulo,
-        tituloInterno: d.tituloInterno,
-        texto: d.documentId === doc.documentId ? conteudoAtual : await getDocText(d.documentId),
-      });
-    }
-    await rebuildAutos(autos.documentId, pecas);
-  } catch (e) {
-    console.warn("Falha ao atualizar o documento único dos autos:", e);
-  }
-  return atual;
-}
-
 /**
- * Cria/atualiza o Google Doc de uma juntada específica (termo + lista numerada dos itens
- * digitados), registra em atual.documentos (participando da paginação normal dos autos) e
- * reconstrói o documento único. A cada chamada o conteúdo é regenerado do zero a partir de
- * atual.juntadas, então fica sempre consistente com os itens realmente cadastrados. As
- * fotos/PDFs de cada item ficam em folhas próprias — ver sincronizarDocumentoItemAnexo.
+ * Cria/atualiza o Google Doc de uma juntada específica (termo + lista de anexos + fotos/PDFs
+ * incorporados), registra em atual.documentos (participando da paginação normal dos autos) e
+ * reconstrói o documento único. Usado tanto ao criar a juntada quanto ao anexar um arquivo
+ * novo — a cada chamada, o conteúdo é regenerado do zero a partir de atual.juntadas, então
+ * fica sempre consistente com os anexos realmente cadastrados.
  */
 async function sincronizarDocumentoJuntada(
   atual: Sindicancia,
   juntadaId: string,
 ): Promise<Sindicancia> {
-  const { createDoc, updateDocContent, formatarPecaBasica } = await import("./google.server");
+  const {
+    createDoc,
+    updateDocContent,
+    formatarPecaBasica,
+    inserirAnexoNoFimDoDocumento,
+    ensureAutosDoc,
+    rebuildAutos,
+    getDocText,
+  } = await import("./google.server");
 
   const juntada = atual.juntadas.find((j) => j.id === juntadaId);
   if (!juntada) return atual;
@@ -85,83 +61,60 @@ async function sincronizarDocumentoJuntada(
     console.warn("Falha ao formatar a juntada:", e);
   }
 
-  return reconstruirAutos(atual, doc, conteudo);
-}
-
-/**
- * Cria/atualiza a folha própria de um item de juntada que tenha arquivo anexado — a foto
- * incorporada, ou um link para abrir o PDF/demais tipos. Fica em página separada, logo após
- * a juntada (ou o último item já anexado a ela), nunca embutida sob a linha do item.
- */
-async function sincronizarDocumentoItemAnexo(
-  atual: Sindicancia,
-  juntadaId: string,
-  itemId: string,
-): Promise<Sindicancia> {
-  const { createDoc, updateDocContent, inserirAnexoNoFimDoDocumento } =
-    await import("./google.server");
-
-  const juntada = atual.juntadas.find((j) => j.id === juntadaId);
-  const item = juntada?.anexos.find((a) => a.id === itemId);
-  if (!juntada || !item || !item.fileId || !item.url) return atual;
-
-  const pecaId = `juntada-${juntadaId}-item-${item.id}`;
-  const tituloDoc = `Anexo — ${item.descricao} — ${atual.nup || atual.id}`;
-  const conteudo = `${cabecalho(atual).replace(/\n+$/, "")}\n\n${item.descricao}\n`;
-
-  const existente = atual.documentos.find((d) => d.pecaId === pecaId);
-  const doc = existente
-    ? await updateDocContent(existente.documentId, conteudo)
-    : await createDoc(tituloDoc, conteudo, atual.pastaId);
-
-  if (existente) {
-    atual.documentos = atual.documentos.map((d) =>
-      d.documentId === existente.documentId ? { ...d, titulo: tituloDoc } : d,
-    );
-  } else {
-    // Insere logo após a juntada ou o último item já anexado a ela, mantendo a sequência
-    // de folhas coerente mesmo quando há vários itens.
-    const prefixoJuntada = `juntada-${juntadaId}`;
-    let idxInsercao = -1;
-    atual.documentos.forEach((d, idx) => {
-      if (d.pecaId === prefixoJuntada || d.pecaId?.startsWith(`${prefixoJuntada}-item-`)) {
-        idxInsercao = idx;
-      }
-    });
-    const novaEntrada = { titulo: tituloDoc, documentId: doc.documentId, url: doc.url, pecaId };
-    atual.documentos =
-      idxInsercao >= 0
-        ? [
-            ...atual.documentos.slice(0, idxInsercao + 1),
-            novaEntrada,
-            ...atual.documentos.slice(idxInsercao + 1),
-          ]
-        : [...atual.documentos, novaEntrada];
+  try {
+for (const anexo of juntada.anexos) {
+      if (!anexo.fileId || !anexo.url) continue;
+      await inserirAnexoNoFimDoDocumento(doc.documentId, {
+        fileId: anexo.fileId,
+        url: anexo.url,
+        mimeType: anexo.mimeType,
+        nomeArquivo: anexo.nomeArquivo ?? anexo.descricao,
+      });
+    }
+  } catch (e) {
+    console.warn("Falha ao incorporar anexos na juntada:", e);
   }
-
-  atual.juntadas = atual.juntadas.map((j) =>
-    j.id === juntadaId
-      ? {
-          ...j,
-          anexos: j.anexos.map((a) =>
-            a.id === itemId ? { ...a, documentId: doc.documentId, docUrl: doc.url } : a,
-          ),
-        }
-      : j,
-  );
 
   try {
-    await inserirAnexoNoFimDoDocumento(doc.documentId, {
-      fileId: item.fileId,
-      url: item.url,
-      mimeType: item.mimeType,
-      nomeArquivo: item.nomeArquivo,
-    });
+    const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+    atual.autosDocId = autos.documentId;
+    atual.autosUrl = autos.url;
+
+    const pecas: {
+      pecaId?: string;
+      titulo: string;
+      tituloInterno?: string;
+      texto: string;
+      anexos?: AnexoJuntada[];
+    }[] = [];
+    for (const d of atual.documentos) {
+      const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+        ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+        : undefined;
+      if (d.documentId === doc.documentId) {
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: conteudo,
+          anexos: juntadaDoItem?.anexos,
+        });
+      } else {
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
+      }
+    }
+    await rebuildAutos(autos.documentId, pecas);
   } catch (e) {
-    console.warn("Falha ao incorporar o anexo na folha própria:", e);
+    console.warn("Falha ao atualizar o documento único dos autos:", e);
   }
 
-  return reconstruirAutos(atual, doc, conteudo);
+  return atual;
 }
 
 export const listarSindicancias = createServerFn({ method: "GET" }).handler(async () => {
@@ -227,13 +180,15 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       createDoc,
       updateDocContent,
       updateRow,
+      ensureAutosDoc,
       ensureSindicanciaFolders,
       arquivoAtivo,
+      rebuildAutos,
+      getDocText,
       formatarPecaBasica,
     } = await import("./google.server");
 
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
-    let atual = atualInicial;
+    const { atual, linha } = await carregar(data.sindicanciaId);
 
     // A pasta da sindicância pode ter sido apagada/movida pra lixeira no Drive por fora do
     // app — nesse caso o ID salvo fica "morto" e os próximos documentos seriam criados fora
@@ -312,8 +267,35 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
 
     // Documento único paginado.
     let autosUrl = atual.autosUrl;
-    atual = await reconstruirAutos(atual, doc, data.conteudo);
-    autosUrl = atual.autosUrl;
+    try {
+      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+      atual.autosDocId = autos.documentId;
+      atual.autosUrl = autos.url;
+      autosUrl = autos.url;
+
+      const pecas: {
+        pecaId?: string;
+        titulo: string;
+        tituloInterno?: string;
+        texto: string;
+        anexos?: AnexoJuntada[];
+      }[] = [];
+      for (const d of lista) {
+        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+          : undefined;
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: d.documentId === doc.documentId ? data.conteudo : await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
+      }
+      await rebuildAutos(autos.documentId, pecas);
+    } catch (e) {
+      console.warn("Falha ao atualizar o documento único dos autos:", e);
+    }
 
     try {
       await updateRow(linha, sindicanciaToRow(atual));
@@ -357,19 +339,16 @@ export const criarJuntada = createServerFn({ method: "POST" })
     return atual.juntadas.find((j) => j.id === juntada.id)!;
   });
 
-/**
- * Adiciona um item digitado a uma juntada — a descrição é texto livre (pode ter vírgula,
- * dois-pontos etc.), independente do nome de um eventual arquivo anexado. Se um arquivo for
- * enviado junto, ele ganha sua própria folha nos autos (foto incorporada, ou link para PDFs
- * e demais tipos) — nunca embutido embaixo da linha do item.
- */
-export const adicionarItemJuntada = createServerFn({ method: "POST" })
+/** Envia um anexo para a pasta "Anexos" do NUP, vincula-o a uma juntada e atualiza o Google
+ *  Doc dela — fotos ficam incorporadas no texto, PDFs e demais tipos viram um link clicável. */
+export const adicionarAnexo = createServerFn({ method: "POST" })
   .inputValidator(
     (data: {
       sindicanciaId: string;
       juntadaId: string;
-      descricao: string;
-      arquivo?: { nome: string; mimeType: string; base64: string };
+      nome: string;
+      mimeType: string;
+      base64: string;
     }) => data,
   )
   .handler(async ({ data }) => {
@@ -378,48 +357,108 @@ export const adicionarItemJuntada = createServerFn({ method: "POST" })
     const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
     let atual = atualInicial;
 
-    let arquivoInfo: { fileId: string; url: string; mimeType: string; nome: string } | undefined;
-    if (data.arquivo) {
-      let anexosId = atual.anexosId;
-      if (!(await arquivoAtivo(anexosId))) {
-        const pastas = await ensureSindicanciaFolders(atual.nup);
-        atual.pastaId = pastas.pastaId;
-        atual.pastaUrl = pastas.pastaUrl;
-        atual.anexosId = pastas.anexosId;
-        atual.anexosUrl = pastas.anexosUrl;
-        anexosId = pastas.anexosId;
-      }
-      if (!anexosId) {
-        throw new Error("Não foi possível localizar ou criar a pasta de anexos no Drive.");
-      }
-
-      const up = await uploadAnexo({
-        nome: data.arquivo.nome,
-        mimeType: data.arquivo.mimeType,
-        base64: data.arquivo.base64,
-        pastaId: anexosId,
-      });
-      arquivoInfo = { fileId: up.fileId, url: up.url, mimeType: up.mimeType, nome: up.nome };
+    let anexosId = atual.anexosId;
+    if (!(await arquivoAtivo(anexosId))) {
+      const pastas = await ensureSindicanciaFolders(atual.nup);
+      atual.pastaId = pastas.pastaId;
+      atual.pastaUrl = pastas.pastaUrl;
+      atual.anexosId = pastas.anexosId;
+      atual.anexosUrl = pastas.anexosUrl;
+      anexosId = pastas.anexosId;
+    }
+    if (!anexosId) {
+      throw new Error("Não foi possível localizar ou criar a pasta de anexos no Drive.");
     }
 
-    const item: AnexoJuntada = {
-      id: `ITEM-${Date.now()}`,
-      descricao: data.descricao,
-      fileId: arquivoInfo?.fileId,
-      url: arquivoInfo?.url,
-      mimeType: arquivoInfo?.mimeType,
-      nomeArquivo: arquivoInfo?.nome,
-    };
+    const arquivo = await uploadAnexo({
+      nome: data.nome,
+      mimeType: data.mimeType,
+      base64: data.base64,
+      pastaId: anexosId,
+    });
 
     atual.juntadas = (atual.juntadas ?? []).map((j) =>
-      j.id === data.juntadaId ? { ...j, anexos: [...j.anexos, item] } : j,
+      j.id === data.juntadaId
+        ? {
+            ...j,
+            anexos: [
+              ...j.anexos,
+              {
+                id: `ANX-${Date.now()}`,
+                descricao: data.nome,
+                fileId: arquivo.fileId,
+                url: arquivo.url,
+                mimeType: arquivo.mimeType,
+                nomeArquivo: arquivo.nome,
+              } satisfies AnexoJuntada,
+            ],
+          }
+        : j,
     );
 
     atual = await sincronizarDocumentoJuntada(atual, data.juntadaId);
-    if (item.fileId) {
-      atual = await sincronizarDocumentoItemAnexo(atual, data.juntadaId, item.id);
+
+    await updateRow(linha, sindicanciaToRow(atual));
+    return arquivo;
+  });
+
+/**
+ * Desfaz a última inserção no documento único: remove a peça da lista dos autos, manda o
+ * documento individual para a lixeira do Drive e reconstrói os autos com a numeração
+ * corrigida. Usado pelo botão "Desfazer" logo após uma exportação confirmada sem querer.
+ */
+export const desfazerInsercao = createServerFn({ method: "POST" })
+  .inputValidator((data: { sindicanciaId: string; documentId: string; etapa?: string }) => data)
+  .handler(async ({ data }) => {
+    const { updateRow, ensureAutosDoc, rebuildAutos, getDocText, moverParaLixeira } =
+      await import("./google.server");
+
+    const { atual, linha } = await carregar(data.sindicanciaId);
+    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
+    if (!alvo) throw new Error("A peça já não consta mais nos autos.");
+
+    atual.documentos = atual.documentos.filter((d) => d.documentId !== data.documentId);
+    if (alvo.pecaId?.startsWith("juntada-")) {
+      atual.juntadas = (atual.juntadas ?? []).filter((j) => `juntada-${j.id}` !== alvo.pecaId);
+    }
+    if (data.etapa) {
+      atual.etapas = (atual.etapas ?? []).filter((e) => e !== data.etapa);
+    }
+
+    try {
+      await moverParaLixeira(data.documentId);
+    } catch (e) {
+      console.warn("Falha ao mover o documento individual para a lixeira:", e);
+    }
+
+    try {
+      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+      atual.autosDocId = autos.documentId;
+      atual.autosUrl = autos.url;
+      const pecas: {
+        pecaId?: string;
+        titulo: string;
+        tituloInterno?: string;
+        texto: string;
+        anexos?: AnexoJuntada[];
+      }[] = [];
+      for (const d of atual.documentos) {
+        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+          : undefined;
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
+      }
+      await rebuildAutos(autos.documentId, pecas);
+    } catch (e) {
+      console.warn("Falha ao reconstruir o documento único após desfazer:", e);
     }
 
     await updateRow(linha, sindicanciaToRow(atual));
-    return item;
+    return { removido: alvo.titulo, total: atual.documentos.length };
   });

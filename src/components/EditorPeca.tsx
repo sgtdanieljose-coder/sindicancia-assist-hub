@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, FileUp, Loader2 } from "lucide-react";
+import { ExternalLink, FileUp, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { exportarParaDocs } from "@/lib/sindicancias.functions";
+import { desfazerInsercao, exportarParaDocs } from "@/lib/sindicancias.functions";
 
 type Props = {
   titulo: string;
@@ -57,6 +57,10 @@ export function EditorPeca({
   );
   const [autosUrl, setAutosUrl] = useState<string | null>(null);
   const [perguntando, setPerguntando] = useState(false);
+  const [ultimaInsercao, setUltimaInsercao] = useState<{
+    documentId: string;
+    posicao: number;
+  } | null>(null);
   const total = pecasExistentes.length + 1;
   const [posicao, setPosicao] = useState(String(total));
 
@@ -81,6 +85,10 @@ export function EditorPeca({
       setDoc(d);
       setAutosUrl(d.autosUrl ?? null);
       setPerguntando(false);
+      // Só é possível desfazer uma inserção nova — atualizações não criam folha adicional.
+      setUltimaInsercao(
+        d.atualizado ? null : { documentId: d.documentId, posicao: d.posicao },
+      );
       toast.success(
         d.atualizado
           ? `Peça atualizada (Fls. ${d.posicao}) — documento individual e autos sincronizados`
@@ -96,25 +104,18 @@ export function EditorPeca({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const alvo = Number(posicao);
-  const previa = [
-    ...pecasExistentes.slice(0, alvo - 1).map((p, i) => ({
-      chave: `a-${p.documentId}-${i}`,
-      titulo: p.titulo,
-      novaPos: i + 1,
-      antigaPos: i + 1,
-      tipo: "inalterada" as const,
-    })),
-    { chave: "nova", titulo, novaPos: alvo, antigaPos: alvo, tipo: "nova" as const },
-    ...pecasExistentes.slice(alvo - 1).map((p, i) => ({
-      chave: `d-${p.documentId}-${i}`,
-      titulo: p.titulo,
-      novaPos: alvo + i + 1,
-      antigaPos: alvo + i,
-      tipo: "deslocada" as const,
-    })),
-  ];
-  const deslocadas = pecasExistentes.length - (alvo - 1);
+  const desfazer = useMutation({
+    mutationFn: (documentId: string) =>
+      desfazerInsercao({ data: { sindicanciaId, documentId, etapa } }),
+    onSuccess: () => {
+      setUltimaInsercao(null);
+      setDoc(null);
+      toast.success("Inserção desfeita — os autos foram repaginados e a peça foi removida.");
+      onExportado?.();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
 
   const acionar = () => {
     if (existente) {
@@ -138,6 +139,31 @@ export function EditorPeca({
           {existente ? "Atualizar no Google Docs" : "Exportar para Google Docs"}
         </Button>
       </div>
+
+      {ultimaInsercao && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            Peça inserida na Fls. {ultimaInsercao.posicao} dos autos. Confirmou sem querer? Você
+            pode desfazer esta inserção — a peça sai dos autos, o documento individual vai para a
+            lixeira do Drive e as folhas são renumeradas.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => desfazer.mutate(ultimaInsercao.documentId)}
+            disabled={desfazer.isPending}
+          >
+            {desfazer.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Undo2 className="size-4" />
+            )}
+            Desfazer inserção
+          </Button>
+        </div>
+      )}
+
+
 
       {existente && (
         <p className="text-xs text-muted-foreground">
@@ -181,33 +207,6 @@ export function EditorPeca({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
-            <p className="rotulo">Prévia da nova numeração dos autos</p>
-            <ul className="max-h-52 space-y-1 overflow-y-auto text-xs">
-              {previa.map((l) => (
-                <li
-                  key={l.chave}
-                  className={
-                    l.tipo === "nova"
-                      ? "font-medium text-primary"
-                      : l.tipo === "deslocada"
-                        ? "text-foreground"
-                        : "text-muted-foreground"
-                  }
-                >
-                  <span className="tabular-nums">Fls. {l.novaPos}</span> — {l.titulo}
-                  {l.tipo === "nova" && " (nova peça)"}
-                  {l.tipo === "deslocada" && ` (antes Fls. ${l.antigaPos})`}
-                </li>
-              ))}
-            </ul>
-            <p className="text-xs text-muted-foreground">
-              {deslocadas === 0
-                ? "Nenhuma folha existente será renumerada."
-                : `${deslocadas} folha(s) serão renumeradas: Fls. ${Number(posicao)}–${pecasExistentes.length} passam a Fls. ${Number(posicao) + 1}–${total}.`}
-            </p>
           </div>
 
           <DialogFooter>
