@@ -57,6 +57,10 @@ export function EditorPeca({
   );
   const [autosUrl, setAutosUrl] = useState<string | null>(null);
   const [perguntando, setPerguntando] = useState(false);
+  const [ultimaInsercao, setUltimaInsercao] = useState<{
+    documentId: string;
+    posicao: number;
+  } | null>(null);
   const total = pecasExistentes.length + 1;
   const [posicao, setPosicao] = useState(String(total));
 
@@ -81,6 +85,10 @@ export function EditorPeca({
       setDoc(d);
       setAutosUrl(d.autosUrl ?? null);
       setPerguntando(false);
+      // Só é possível desfazer uma inserção nova — atualizações não criam folha adicional.
+      setUltimaInsercao(
+        d.atualizado ? null : { documentId: d.documentId, posicao: d.posicao },
+      );
       toast.success(
         d.atualizado
           ? `Peça atualizada (Fls. ${d.posicao}) — documento individual e autos sincronizados`
@@ -95,6 +103,19 @@ export function EditorPeca({
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const desfazer = useMutation({
+    mutationFn: (documentId: string) =>
+      desfazerInsercao({ data: { sindicanciaId, documentId, etapa } }),
+    onSuccess: () => {
+      setUltimaInsercao(null);
+      setDoc(null);
+      toast.success("Inserção desfeita — os autos foram repaginados e a peça foi removida.");
+      onExportado?.();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
 
   const acionar = () => {
     if (existente) {
