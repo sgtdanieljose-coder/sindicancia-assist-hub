@@ -307,42 +307,6 @@ async function inserirBrasao(documentId: string, index = 1) {
   }
 }
 
-/**
- * Insere o carimbo de paginação (imagem) imediatamente antes do marcador "Fls. N" da folha,
- * alinhado à direita. Chamado a cada reconstrução dos autos, de modo que a numeração se
- * reajusta sozinha quando uma peça nova entra em qualquer página. Best-effort.
- */
-async function inserirCarimbo(documentId: string, index: number) {
-  try {
-    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
-      method: "POST",
-      body: {
-        requests: [
-          {
-            insertInlineImage: {
-              location: { index },
-              uri: CARIMBO_URL,
-              objectSize: {
-                height: { magnitude: 56.7, unit: "PT" },
-                width: { magnitude: 56.7, unit: "PT" },
-              },
-            },
-          },
-          {
-            updateParagraphStyle: {
-              range: { startIndex: index, endIndex: index + 1 },
-              paragraphStyle: { alignment: "END" },
-              fields: "alignment",
-            },
-          },
-        ],
-      },
-    });
-  } catch (e) {
-    console.warn("Não foi possível inserir o carimbo de paginação:", e);
-  }
-}
-
 /** Cria um Google Doc com brasão + texto e devolve id/url. */
 export async function createDoc(title: string, content: string, pastaId?: string) {
   const doc = await gw<{ documentId: string }>("google_docs", "/v1/documents", {
@@ -707,21 +671,79 @@ export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?:
 }
 
 /**
+ * Garante que o documento tenha um cabeçalho de página com o carimbo fixo, alinhado à
+ * direita. Cabeçalhos se repetem automaticamente em toda página e ficam na margem — não
+ * disputam espaço com o texto/fotos do corpo, ao contrário de uma imagem solta no meio do
+ * texto. Idempotente: não insere um segundo carimbo se o cabeçalho já tiver um.
+ */
+async function garantirCarimboFixo(documentId: string) {
+  try {
+    const doc = await gw<{
+      headers?: Record<
+        string,
+        { content?: { paragraph?: { elements?: { inlineObjectElement?: unknown }[] } }[] }
+      >;
+    }>("google_docs", `/v1/documents/${documentId}`, { query: { fields: "headers" } });
+
+    const headersMap = doc.headers ?? {};
+    let headerId = Object.keys(headersMap)[0];
+
+    if (headerId) {
+      const jaTemImagem = (headersMap[headerId].content ?? []).some((el) =>
+        (el.paragraph?.elements ?? []).some((e) => e.inlineObjectElement),
+      );
+      if (jaTemImagem) return;
+    } else {
+      const criado = await gw<{ headerId: string }>(
+        "google_docs",
+        `/v1/documents/${documentId}:batchUpdate`,
+        { method: "POST", body: { requests: [{ createHeader: { type: "DEFAULT" } }] } },
+      );
+      headerId = criado.headerId;
+    }
+
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: {
+        requests: [
+          {
+            insertInlineImage: {
+              location: { index: 1, segmentId: headerId },
+              uri: CARIMBO_URL,
+              objectSize: {
+                height: { magnitude: 56.7, unit: "PT" },
+                width: { magnitude: 56.7, unit: "PT" },
+              },
+            },
+          },
+          {
+            updateParagraphStyle: {
+              range: { startIndex: 1, endIndex: 2, segmentId: headerId },
+              paragraphStyle: { alignment: "END" },
+              fields: "alignment",
+            },
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    console.warn("Não foi possível fixar o carimbo no cabeçalho de página:", e);
+  }
+}
+
+/**
  * Reescreve o documento único dos autos com as peças na ordem informada, numerando as
  * folhas ("Fls. N"), sempre em página própria (quebra de página de verdade, não um simples
  * caractere de texto), com o brasão no início de cada uma, e reaplicando a MESMA formatação
- * usada no documento individual de cada peça — ver gruposFormatacaoPeca.
+ * usada no documento individual de cada peça — ver gruposFormatacaoPeca. O carimbo fica
+ * fixo no cabeçalho de página (ver garantirCarimboFixo), não mais solto no meio do texto.
  */
 export async function rebuildAutos(
   documentId: string,
-  pecas: {
-    pecaId?: string;
-    titulo: string;
-    tituloInterno?: string;
-    texto: string;
-    anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
-  }[],
+  pecas: { pecaId?: string; titulo: string; tituloInterno?: string; texto: string }[],
 ) {
+  await garantirCarimboFixo(documentId);
+
   // 1) Limpa o conteúdo atual.
   const atual = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
     "google_docs",
@@ -753,10 +775,8 @@ export async function rebuildAutos(
   });
 
   // 3) Quebra de página de verdade (não caractere de texto) + brasão no início de cada peça —
-  //    sempre em página própria — e o carimbo de paginação colado ao marcador "Fls. N". Como
-  //    isso roda a cada reconstrução, a numeração carimbada se reajusta sozinha quando uma
-  //    peça nova é inserida em qualquer página. De trás para frente: como cada peça só mexe em
-  //    índices a partir do próprio início, os índices das peças anteriores continuam válidos.
+  //    sempre em página própria. De trás para frente: como cada peça só mexe em índices a
+  //    partir do próprio início, os índices das peças anteriores continuam válidos.
   for (let i = pecas.length - 1; i >= 0; i--) {
     if (i > 0) {
       await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
@@ -764,11 +784,8 @@ export async function rebuildAutos(
         body: { requests: [{ insertPageBreak: { location: { index: inicios[i] } } }] },
       });
       await inserirBrasao(documentId, inicios[i] + 1);
-      // +1 quebra de página, +1 brasão, +1 "\n" que antecede o marcador.
-      await inserirCarimbo(documentId, inicios[i] + 3);
     } else {
       await inserirBrasao(documentId, inicios[i]);
-      await inserirCarimbo(documentId, inicios[i] + 2);
     }
   }
 
@@ -779,24 +796,28 @@ export async function rebuildAutos(
   //    malformado não derrube a formatação das demais peças.
   const paragrafos = await listarParagrafos(documentId);
   const marcadores = paragrafos
-    // O parágrafo do marcador agora também contém a imagem do carimbo, que aparece como
-    // caractere de objeto — remove antes de comparar.
-    .map((p, idx) => ({ idx, texto: p.texto.replace(/[\uE000-\uF8FF\uFFFC\n]/g, "").trim() }))
+    .map((p, idx) => ({ idx, texto: p.texto.replace(/\n$/, "").trim() }))
     .filter((m) => /^Fls\.\s*\d+$/.test(m.texto));
 
   const gruposPorNome = new Map<string, unknown[]>();
+  marcadores.forEach((m) => {
+    const p = paragrafos[m.idx];
+    gruposPorNome.set("marcador de folha", [
+      ...(gruposPorNome.get("marcador de folha") ?? []),
+      {
+        updateParagraphStyle: {
+          range: { startIndex: p.startIndex, endIndex: p.startIndex + m.texto.length },
+          paragraphStyle: { alignment: "END" },
+          fields: "alignment",
+        },
+      },
+    ]);
+  });
   marcadores.forEach((m, i) => {
     const fimIdx = i + 1 < marcadores.length ? marcadores[i + 1].idx : paragrafos.length;
     const doSegmento = paragrafos.slice(m.idx + 1, fimIdx);
     for (const g of gruposFormatacaoPeca(doSegmento, pecas[i]?.pecaId, pecas[i]?.tituloInterno)) {
       gruposPorNome.set(g.nome, [...(gruposPorNome.get(g.nome) ?? []), ...g.requests]);
-    }
-    const anexos = pecas[i]?.anexos;
-    if (anexos?.length) {
-      const requests = requestsAnexosJuntada(doSegmento, anexos);
-      if (requests.length) {
-        gruposPorNome.set("anexos", [...(gruposPorNome.get("anexos") ?? []), ...requests]);
-      }
     }
   });
 
@@ -862,59 +883,43 @@ export async function uploadAnexo(params: {
 }
 
 /**
- * Monta as requisições para incorporar, logo após cada linha numerada da lista de anexos de
- * uma juntada ("N. nome"), a própria foto (imagens) ou um link clicável para abrir o arquivo
- * (PDFs e demais tipos). Processado de trás para frente para os índices dos itens anteriores
- * permanecerem válidos — a API aplica as requisições em ordem dentro de uma mesma chamada.
+ * Insere, ao final de um documento (o "folha própria" de um item de juntada), a foto
+ * incorporada (imagens) ou um link clicável para abrir o arquivo (PDFs e demais tipos).
  */
-function requestsAnexosJuntada(
-  paragrafos: Paragrafo[],
-  anexos: { nome: string; fileId: string; url: string; mimeType: string }[],
-): unknown[] {
-  const requests: unknown[] = [];
-  for (let i = anexos.length - 1; i >= 0; i--) {
-    const anexo = anexos[i];
-    const linhaEsperada = `${i + 1}. ${anexo.nome}`;
-    const paragrafo = paragrafos.find((p) => p.texto.replace(/\n$/, "").trim() === linhaEsperada);
-    if (!paragrafo) continue;
-    const ponto = paragrafo.endIndex;
-
-    if (anexo.mimeType.startsWith("image/")) {
-      requests.push({
-        insertInlineImage: {
-          location: { index: ponto },
-          uri: `https://drive.google.com/uc?export=view&id=${anexo.fileId}`,
-        },
-      });
-    } else {
-      const texto = `📎 Abrir arquivo: ${anexo.nome}\n`;
-      requests.push(
-        { insertText: { location: { index: ponto }, text: texto } },
-        {
-          updateTextStyle: {
-            range: { startIndex: ponto, endIndex: ponto + texto.length - 1 },
-            textStyle: { link: { url: anexo.url } },
-            fields: "link",
-          },
-        },
-      );
-    }
-  }
-  return requests;
-}
-
-/** Incorpora os anexos de uma juntada no documento individual dela. Best-effort — a falha em
- *  incorporar um anexo específico não impede os demais nem o resto do fluxo de exportação. */
-export async function inserirAnexosNaJuntada(
+export async function inserirAnexoNoFimDoDocumento(
   documentId: string,
-  anexos: { nome: string; fileId: string; url: string; mimeType: string }[],
+  anexo: { fileId: string; url: string; mimeType?: string; nomeArquivo?: string },
 ) {
-  const paragrafos = await listarParagrafos(documentId);
-  const requests = requestsAnexosJuntada(paragrafos, anexos);
-  if (requests.length) {
-    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
-      method: "POST",
-      body: { requests },
+  const doc = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
+    "google_docs",
+    `/v1/documents/${documentId}`,
+  );
+  const fim = (doc.body?.content?.at(-1)?.endIndex ?? 2) - 1;
+
+  const requests: unknown[] = [];
+  if ((anexo.mimeType ?? "").startsWith("image/")) {
+    requests.push({
+      insertInlineImage: {
+        location: { index: fim },
+        uri: `https://drive.google.com/uc?export=view&id=${anexo.fileId}`,
+      },
     });
+  } else {
+    const texto = `📎 Abrir arquivo: ${anexo.nomeArquivo ?? "anexo"}\n`;
+    requests.push(
+      { insertText: { location: { index: fim }, text: texto } },
+      {
+        updateTextStyle: {
+          range: { startIndex: fim, endIndex: fim + texto.length - 1 },
+          textStyle: { link: { url: anexo.url } },
+          fields: "link",
+        },
+      },
+    );
   }
+
+  await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+    method: "POST",
+    body: { requests },
+  });
 }
