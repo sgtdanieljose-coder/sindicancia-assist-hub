@@ -2,6 +2,7 @@ export type AnexoJuntada = {
   nome: string;
   fileId: string;
   url: string;
+  mimeType: string;
 };
 
 export type Juntada = {
@@ -10,6 +11,9 @@ export type Juntada = {
   titulo: string;
   data: string;
   anexos: AnexoJuntada[];
+  /** Documento (Google Docs) desta juntada — termo + lista de anexos incorporada. */
+  documentId?: string;
+  url?: string;
 };
 
 export type Sindicancia = {
@@ -24,7 +28,15 @@ export type Sindicancia = {
   objeto: string;
   status: string;
   etapas: string[];
-  documentos: { titulo: string; documentId: string; url: string; pecaId?: string }[];
+  documentos: {
+    titulo: string;
+    documentId: string;
+    url: string;
+    pecaId?: string;
+    /** Título literal esperado DENTRO do corpo do texto (quando difere do TITULOS_PECA
+     *  estático — ex.: cada juntada tem seu próprio "JUNTADA Nº N"). */
+    tituloInterno?: string;
+  }[];
   atualizadoEm: string;
   /** Pasta da sindicância no Drive (nome = NUP), criada automaticamente ao salvar. */
   pastaId?: string;
@@ -110,12 +122,6 @@ export const PECAS = [
     etapa: "Depoimento do sindicado",
   },
   { id: "oficio", nome: "Ofício / Mandado de Intimação", unica: false, etapa: undefined },
-  {
-    id: "juntada",
-    nome: "Juntada de Documentos",
-    unica: false,
-    etapa: "Juntada de documentos",
-  },
   {
     id: "encerramento",
     nome: "Termo de Encerramento da Instrução",
@@ -337,24 +343,6 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
         ].join("\n");
       }
 
-      case "juntada":
-        return [
-          ...ESPACO_ANTES_TITULO,
-          "JUNTADA",
-          "",
-          `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, no quartel do ${s.om || "OM"}, faço a juntada aos autos da presente sindicância dos documentos a seguir especificados, do que, para constar, lavrei o presente termo.`,
-          "",
-          (c.documentos || "xxxxxxx")
-            .split("\n")
-            .map((d) => d.trim())
-            .filter(Boolean)
-            .map(
-              (d, i, arr) =>
-                `${i + 1}. ${d.replace(/[.;]$/, "")}${i === arr.length - 1 ? "." : ";"}`,
-            )
-            .join("\n\n"),
-        ].join("\n");
-
       case "notificacao":
         return [
           subcabecalhoProcesso(s),
@@ -470,6 +458,30 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
   })();
 
   return `${head}${corpo}\n${assinatura(s)}`;
+}
+
+/**
+ * Gera o texto de uma juntada específica (com numeração própria, ex.: "JUNTADA Nº 2"),
+ * listando os anexos já enviados. Segue a mesma convenção de formatação-base das demais
+ * peças; as fotos/PDFs em si são incorporados depois, sobre o Google Doc já criado — ver
+ * inserirAnexosNaJuntada em google.server.ts.
+ */
+export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
+  const titulo = `JUNTADA Nº ${j.numero}`;
+  const listaAnexos = j.anexos.length
+    ? j.anexos.map((a, i) => `${i + 1}. ${a.nome}`).join("\n\n")
+    : "(nenhum documento anexado até o momento)";
+
+  const corpo = [
+    ...ESPACO_ANTES_TITULO,
+    titulo,
+    "",
+    `Aos ${dataPorExtenso(j.data)}, nesta cidade de ${s.local || "____________"}, no quartel do ${s.om || "OM"}, faço a juntada aos autos da presente sindicância dos documentos a seguir especificados, do que, para constar, lavrei o presente termo.`,
+    "",
+    listaAnexos,
+  ].join("\n");
+
+  return `${cabecalho(s)}${corpo}\n${assinatura(s)}`;
 }
 
 export type Relatorio = {
