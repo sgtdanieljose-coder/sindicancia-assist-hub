@@ -373,3 +373,64 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
     await updateRow(linha, sindicanciaToRow(atual));
     return arquivo;
   });
+
+/**
+ * Desfaz a última inserção no documento único: remove a peça da lista dos autos, manda o
+ * documento individual para a lixeira do Drive e reconstrói os autos com a numeração
+ * corrigida. Usado pelo botão "Desfazer" logo após uma exportação confirmada sem querer.
+ */
+export const desfazerInsercao = createServerFn({ method: "POST" })
+  .inputValidator((data: { sindicanciaId: string; documentId: string; etapa?: string }) => data)
+  .handler(async ({ data }) => {
+    const { updateRow, ensureAutosDoc, rebuildAutos, getDocText, moverParaLixeira } =
+      await import("./google.server");
+
+    const { atual, linha } = await carregar(data.sindicanciaId);
+    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
+    if (!alvo) throw new Error("A peça já não consta mais nos autos.");
+
+    atual.documentos = atual.documentos.filter((d) => d.documentId !== data.documentId);
+    if (alvo.pecaId?.startsWith("juntada-")) {
+      atual.juntadas = (atual.juntadas ?? []).filter((j) => `juntada-${j.id}` !== alvo.pecaId);
+    }
+    if (data.etapa) {
+      atual.etapas = (atual.etapas ?? []).filter((e) => e !== data.etapa);
+    }
+
+    try {
+      await moverParaLixeira(data.documentId);
+    } catch (e) {
+      console.warn("Falha ao mover o documento individual para a lixeira:", e);
+    }
+
+    try {
+      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+      atual.autosDocId = autos.documentId;
+      atual.autosUrl = autos.url;
+      const pecas: {
+        pecaId?: string;
+        titulo: string;
+        tituloInterno?: string;
+        texto: string;
+        anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
+      }[] = [];
+      for (const d of atual.documentos) {
+        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+          : undefined;
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
+      }
+      await rebuildAutos(autos.documentId, pecas);
+    } catch (e) {
+      console.warn("Falha ao reconstruir o documento único após desfazer:", e);
+    }
+
+    await updateRow(linha, sindicanciaToRow(atual));
+    return { removido: alvo.titulo, total: atual.documentos.length };
+  });

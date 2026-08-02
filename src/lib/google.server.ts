@@ -923,3 +923,11 @@ export async function inserirAnexoNoFimDoDocumento(
     body: { requests },
   });
 }
+
+/** Move um arquivo do Drive para a lixeira (usado ao desfazer a inserção de uma peça). */
+export async function moverParaLixeira(fileId: string) {
+  await gw("google_drive", `/drive/v3/files/${fileId}`, {
+    method: "PATCH",
+    body: { trashed: true },
+  });
+}
