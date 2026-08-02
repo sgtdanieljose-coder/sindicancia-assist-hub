@@ -323,8 +323,8 @@ async function inserirCarimbo(documentId: string, index: number) {
               location: { index },
               uri: CARIMBO_URL,
               objectSize: {
-                height: { magnitude: 78, unit: "PT" },
-                width: { magnitude: 78, unit: "PT" },
+                height: { magnitude: 56.7, unit: "PT" },
+                width: { magnitude: 56.7, unit: "PT" },
               },
             },
           },
@@ -342,8 +342,6 @@ async function inserirCarimbo(documentId: string, index: number) {
     console.warn("Não foi possível inserir o carimbo de paginação:", e);
   }
 }
-
-
 
 /** Cria um Google Doc com brasão + texto e devolve id/url. */
 export async function createDoc(title: string, content: string, pastaId?: string) {
@@ -446,7 +444,6 @@ async function listarParagrafos(documentId: string): Promise<Paragrafo[]> {
 const TITULOS_PECA: Partial<Record<string, string>> = {
   autos: "AUTOS DE SINDICÂNCIA",
   abertura: "TERMO DE ABERTURA",
-  juntada: "JUNTADA",
 };
 
 const ROTULOS_CAPA = ["NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:"];
@@ -598,9 +595,13 @@ type GrupoFormatacao = { nome: string; requests: unknown[] };
 
 /** Mesmos passos de sempre, mas em grupos nomeados — cada grupo vira uma chamada separada à
  *  API (ver formatarPecaBasica/rebuildAutos), então um pedaço malformado não derruba os outros. */
-function gruposFormatacaoPeca(paragrafos: Paragrafo[], pecaId?: string): GrupoFormatacao[] {
+function gruposFormatacaoPeca(
+  paragrafos: Paragrafo[],
+  pecaId?: string,
+  tituloExplicito?: string,
+): GrupoFormatacao[] {
   if (!pecaId) return [];
-  const titulo = TITULOS_PECA[pecaId];
+  const titulo = tituloExplicito ?? TITULOS_PECA[pecaId];
   const grupos: GrupoFormatacao[] = [];
 
   if (titulo) {
@@ -625,10 +626,16 @@ function gruposFormatacaoPeca(paragrafos: Paragrafo[], pecaId?: string): GrupoFo
 
 /** Aplica a formatação-base (ver comentário acima) ao documento individual de uma peça, um
  *  grupo por vez. Se algum grupo falhar, os demais ainda são aplicados; ao final, lança um
- *  erro descrevendo exatamente quais grupos falharam (para diagnóstico, em vez de silêncio). */
-export async function formatarPecaBasica(documentId: string, pecaId?: string) {
+ *  erro descrevendo exatamente quais grupos falharam (para diagnóstico, em vez de silêncio).
+ *  `tituloExplicito` é usado por peças com título dinâmico (ex.: "JUNTADA Nº 2"), que não têm
+ *  uma entrada fixa em TITULOS_PECA. */
+export async function formatarPecaBasica(
+  documentId: string,
+  pecaId?: string,
+  tituloExplicito?: string,
+) {
   const paragrafos = await listarParagrafos(documentId);
-  const grupos = gruposFormatacaoPeca(paragrafos, pecaId);
+  const grupos = gruposFormatacaoPeca(paragrafos, pecaId, tituloExplicito);
   const erros: string[] = [];
 
   for (const g of grupos) {
@@ -707,7 +714,13 @@ export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?:
  */
 export async function rebuildAutos(
   documentId: string,
-  pecas: { pecaId?: string; titulo: string; texto: string }[],
+  pecas: {
+    pecaId?: string;
+    titulo: string;
+    tituloInterno?: string;
+    texto: string;
+    anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
+  }[],
 ) {
   // 1) Limpa o conteúdo atual.
   const atual = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
@@ -759,7 +772,6 @@ export async function rebuildAutos(
     }
   }
 
-
   // 4) Reaplica, sobre o documento já paginado, a MESMA formatação usada em cada documento
   //    individual (gruposFormatacaoPeca) — localizando cada peça pelo marcador "Fls. N", já
   //    que os índices calculados antes das quebras de página não valem mais depois delas.
@@ -776,8 +788,15 @@ export async function rebuildAutos(
   marcadores.forEach((m, i) => {
     const fimIdx = i + 1 < marcadores.length ? marcadores[i + 1].idx : paragrafos.length;
     const doSegmento = paragrafos.slice(m.idx + 1, fimIdx);
-    for (const g of gruposFormatacaoPeca(doSegmento, pecas[i]?.pecaId)) {
+    for (const g of gruposFormatacaoPeca(doSegmento, pecas[i]?.pecaId, pecas[i]?.tituloInterno)) {
       gruposPorNome.set(g.nome, [...(gruposPorNome.get(g.nome) ?? []), ...g.requests]);
+    }
+    const anexos = pecas[i]?.anexos;
+    if (anexos?.length) {
+      const requests = requestsAnexosJuntada(doSegmento, anexos);
+      if (requests.length) {
+        gruposPorNome.set("anexos", [...(gruposPorNome.get("anexos") ?? []), ...requests]);
+      }
     }
   });
 
@@ -822,9 +841,80 @@ export async function uploadAnexo(params: {
     body,
   })) as { id: string; name: string; webViewLink?: string };
 
+  // Necessário para o Google Docs conseguir buscar a imagem e incorporá-la (ver
+  // inserirAnexosNaJuntada) — sem isso, a incorporação falha silenciosamente para arquivos
+  // privados. Best-effort: se falhar, o anexo continua salvo, só não vira foto incorporada.
+  try {
+    await gw("google_drive", `/drive/v3/files/${res.id}/permissions`, {
+      method: "POST",
+      body: { type: "anyone", role: "reader" },
+    });
+  } catch (e) {
+    console.warn("Não foi possível tornar o anexo acessível por link:", e);
+  }
+
   return {
     fileId: res.id,
     nome: res.name ?? params.nome,
+    mimeType: params.mimeType || "application/octet-stream",
     url: res.webViewLink ?? `https://drive.google.com/file/d/${res.id}/view`,
   };
+}
+
+/**
+ * Monta as requisições para incorporar, logo após cada linha numerada da lista de anexos de
+ * uma juntada ("N. nome"), a própria foto (imagens) ou um link clicável para abrir o arquivo
+ * (PDFs e demais tipos). Processado de trás para frente para os índices dos itens anteriores
+ * permanecerem válidos — a API aplica as requisições em ordem dentro de uma mesma chamada.
+ */
+function requestsAnexosJuntada(
+  paragrafos: Paragrafo[],
+  anexos: { nome: string; fileId: string; url: string; mimeType: string }[],
+): unknown[] {
+  const requests: unknown[] = [];
+  for (let i = anexos.length - 1; i >= 0; i--) {
+    const anexo = anexos[i];
+    const linhaEsperada = `${i + 1}. ${anexo.nome}`;
+    const paragrafo = paragrafos.find((p) => p.texto.replace(/\n$/, "").trim() === linhaEsperada);
+    if (!paragrafo) continue;
+    const ponto = paragrafo.endIndex;
+
+    if (anexo.mimeType.startsWith("image/")) {
+      requests.push({
+        insertInlineImage: {
+          location: { index: ponto },
+          uri: `https://drive.google.com/uc?export=view&id=${anexo.fileId}`,
+        },
+      });
+    } else {
+      const texto = `📎 Abrir arquivo: ${anexo.nome}\n`;
+      requests.push(
+        { insertText: { location: { index: ponto }, text: texto } },
+        {
+          updateTextStyle: {
+            range: { startIndex: ponto, endIndex: ponto + texto.length - 1 },
+            textStyle: { link: { url: anexo.url } },
+            fields: "link",
+          },
+        },
+      );
+    }
+  }
+  return requests;
+}
+
+/** Incorpora os anexos de uma juntada no documento individual dela. Best-effort — a falha em
+ *  incorporar um anexo específico não impede os demais nem o resto do fluxo de exportação. */
+export async function inserirAnexosNaJuntada(
+  documentId: string,
+  anexos: { nome: string; fileId: string; url: string; mimeType: string }[],
+) {
+  const paragrafos = await listarParagrafos(documentId);
+  const requests = requestsAnexosJuntada(paragrafos, anexos);
+  if (requests.length) {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests },
+    });
+  }
 }
