@@ -140,6 +140,31 @@ export function EditorPeca({
         </Button>
       </div>
 
+      {ultimaInsercao && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            Peça inserida na Fls. {ultimaInsercao.posicao} dos autos. Confirmou sem querer? Você
+            pode desfazer esta inserção — a peça sai dos autos, o documento individual vai para a
+            lixeira do Drive e as folhas são renumeradas.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => desfazer.mutate(ultimaInsercao.documentId)}
+            disabled={desfazer.isPending}
+          >
+            {desfazer.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Undo2 className="size-4" />
+            )}
+            Desfazer inserção
+          </Button>
+        </div>
+      )}
+
+
+
       {existente && (
         <p className="text-xs text-muted-foreground">
           Esta peça já foi exportada (Fls.{" "}
