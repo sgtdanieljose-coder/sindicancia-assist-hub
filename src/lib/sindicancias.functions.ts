@@ -1,7 +1,108 @@
 import { createServerFn } from "@tanstack/react-start";
-import type { Juntada, Sindicancia } from "./pecas";
+import { gerarTextoJuntada, type Juntada, type Sindicancia } from "./pecas";
 import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
 import { carregar } from "./sindicancias.server";
+
+/**
+ * Cria/atualiza o Google Doc de uma juntada específica (termo + lista de anexos + fotos/PDFs
+ * incorporados), registra em atual.documentos (participando da paginação normal dos autos) e
+ * reconstrói o documento único. Usado tanto ao criar a juntada quanto ao anexar um arquivo
+ * novo — a cada chamada, o conteúdo é regenerado do zero a partir de atual.juntadas, então
+ * fica sempre consistente com os anexos realmente cadastrados.
+ */
+async function sincronizarDocumentoJuntada(
+  atual: Sindicancia,
+  juntadaId: string,
+): Promise<Sindicancia> {
+  const {
+    createDoc,
+    updateDocContent,
+    formatarPecaBasica,
+    inserirAnexosNaJuntada,
+    ensureAutosDoc,
+    rebuildAutos,
+    getDocText,
+  } = await import("./google.server");
+
+  const juntada = atual.juntadas.find((j) => j.id === juntadaId);
+  if (!juntada) return atual;
+
+  const pecaId = `juntada-${juntada.id}`;
+  const tituloInterno = `JUNTADA Nº ${juntada.numero}`;
+  const tituloDoc = `${tituloInterno} — ${atual.nup || atual.id}`;
+  const conteudo = gerarTextoJuntada(atual, juntada);
+
+  const existente = atual.documentos.find((d) => d.pecaId === pecaId);
+  const doc = existente
+    ? await updateDocContent(existente.documentId, conteudo)
+    : await createDoc(tituloDoc, conteudo, atual.pastaId);
+
+  atual.documentos = existente
+    ? atual.documentos.map((d) =>
+        d.documentId === existente.documentId ? { ...d, titulo: tituloDoc, tituloInterno } : d,
+      )
+    : [
+        ...atual.documentos,
+        { titulo: tituloDoc, documentId: doc.documentId, url: doc.url, pecaId, tituloInterno },
+      ];
+
+  atual.juntadas = atual.juntadas.map((j) =>
+    j.id === juntada.id ? { ...j, documentId: doc.documentId, url: doc.url } : j,
+  );
+
+  try {
+    await formatarPecaBasica(doc.documentId, pecaId, tituloInterno);
+  } catch (e) {
+    console.warn("Falha ao formatar a juntada:", e);
+  }
+
+  try {
+    await inserirAnexosNaJuntada(doc.documentId, juntada.anexos);
+  } catch (e) {
+    console.warn("Falha ao incorporar anexos na juntada:", e);
+  }
+
+  try {
+    const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+    atual.autosDocId = autos.documentId;
+    atual.autosUrl = autos.url;
+
+    const pecas: {
+      pecaId?: string;
+      titulo: string;
+      tituloInterno?: string;
+      texto: string;
+      anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
+    }[] = [];
+    for (const d of atual.documentos) {
+      const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+        ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+        : undefined;
+      if (d.documentId === doc.documentId) {
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: conteudo,
+          anexos: juntadaDoItem?.anexos,
+        });
+      } else {
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
+      }
+    }
+    await rebuildAutos(autos.documentId, pecas);
+  } catch (e) {
+    console.warn("Falha ao atualizar o documento único dos autos:", e);
+  }
+
+  return atual;
+}
 
 export const listarSindicancias = createServerFn({ method: "GET" }).handler(async () => {
   const { readRows } = await import("./google.server");
@@ -159,13 +260,24 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       atual.autosUrl = autos.url;
       autosUrl = autos.url;
 
-      const pecas: { pecaId?: string; titulo: string; texto: string }[] = [];
+      const pecas: {
+        pecaId?: string;
+        titulo: string;
+        tituloInterno?: string;
+        texto: string;
+        anexos?: { nome: string; fileId: string; url: string; mimeType: string }[];
+      }[] = [];
       for (const d of lista) {
-        if (d.documentId === doc.documentId) {
-          pecas.push({ pecaId: d.pecaId, titulo: d.titulo, texto: data.conteudo });
-        } else {
-          pecas.push({ pecaId: d.pecaId, titulo: d.titulo, texto: await getDocText(d.documentId) });
-        }
+        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+          : undefined;
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: d.documentId === doc.documentId ? data.conteudo : await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
       }
       await rebuildAutos(autos.documentId, pecas);
     } catch (e) {
@@ -188,25 +300,34 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     };
   });
 
-/** Cria uma nova juntada (numerada) vinculada ao NUP da sindicância. */
+/** Cria uma nova juntada (numerada) vinculada ao NUP da sindicância, com seu próprio Google
+ *  Doc (termo + lista de anexos), já inserido no documento único dos autos. Pode ser chamada
+ *  quantas vezes forem necessárias — cada sindicância pode ter várias juntadas. */
 export const criarJuntada = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string; titulo: string; data: string }) => data)
   .handler(async ({ data }) => {
     const { updateRow } = await import("./google.server");
-    const { atual, linha } = await carregar(data.sindicanciaId);
+    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    let atual = atualInicial;
+    const numero = (atual.juntadas?.length ?? 0) + 1;
     const juntada: Juntada = {
       id: `JUN-${Date.now()}`,
-      numero: (atual.juntadas?.length ?? 0) + 1,
-      titulo: data.titulo || `Juntada nº ${(atual.juntadas?.length ?? 0) + 1}`,
+      numero,
+      titulo: data.titulo || `Juntada nº ${numero}`,
       data: data.data || new Date().toISOString().slice(0, 10),
       anexos: [],
     };
     atual.juntadas = [...(atual.juntadas ?? []), juntada];
+    atual.documentos = atual.documentos ?? [];
+
+    atual = await sincronizarDocumentoJuntada(atual, juntada.id);
+
     await updateRow(linha, sindicanciaToRow(atual));
-    return juntada;
+    return atual.juntadas.find((j) => j.id === juntada.id)!;
   });
 
-/** Envia um anexo para a pasta "Anexos" do NUP e vincula-o a uma juntada. */
+/** Envia um anexo para a pasta "Anexos" do NUP, vincula-o a uma juntada e atualiza o Google
+ *  Doc dela — fotos ficam incorporadas no texto, PDFs e demais tipos viram um link clicável. */
 export const adicionarAnexo = createServerFn({ method: "POST" })
   .inputValidator(
     (data: {
@@ -220,7 +341,8 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { uploadAnexo, updateRow, ensureSindicanciaFolders, arquivoAtivo } =
       await import("./google.server");
-    const { atual, linha } = await carregar(data.sindicanciaId);
+    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    let atual = atualInicial;
 
     let anexosId = atual.anexosId;
     if (!(await arquivoAtivo(anexosId))) {
@@ -245,6 +367,8 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
     atual.juntadas = (atual.juntadas ?? []).map((j) =>
       j.id === data.juntadaId ? { ...j, anexos: [...j.anexos, arquivo] } : j,
     );
+
+    atual = await sincronizarDocumentoJuntada(atual, data.juntadaId);
 
     await updateRow(linha, sindicanciaToRow(atual));
     return arquivo;
