@@ -96,6 +96,26 @@ export function EditorPeca({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const alvo = Number(posicao);
+  const previa = [
+    ...pecasExistentes.slice(0, alvo - 1).map((p, i) => ({
+      chave: `a-${p.documentId}-${i}`,
+      titulo: p.titulo,
+      novaPos: i + 1,
+      antigaPos: i + 1,
+      tipo: "inalterada" as const,
+    })),
+    { chave: "nova", titulo, novaPos: alvo, antigaPos: alvo, tipo: "nova" as const },
+    ...pecasExistentes.slice(alvo - 1).map((p, i) => ({
+      chave: `d-${p.documentId}-${i}`,
+      titulo: p.titulo,
+      novaPos: alvo + i + 1,
+      antigaPos: alvo + i,
+      tipo: "deslocada" as const,
+    })),
+  ];
+  const deslocadas = pecasExistentes.length - (alvo - 1);
+
   const acionar = () => {
     if (existente) {
       exportar.mutate(undefined);
@@ -161,6 +181,33 @@ export function EditorPeca({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+            <p className="rotulo">Prévia da nova numeração dos autos</p>
+            <ul className="max-h-52 space-y-1 overflow-y-auto text-xs">
+              {previa.map((l) => (
+                <li
+                  key={l.chave}
+                  className={
+                    l.tipo === "nova"
+                      ? "font-medium text-primary"
+                      : l.tipo === "deslocada"
+                        ? "text-foreground"
+                        : "text-muted-foreground"
+                  }
+                >
+                  <span className="tabular-nums">Fls. {l.novaPos}</span> — {l.titulo}
+                  {l.tipo === "nova" && " (nova peça)"}
+                  {l.tipo === "deslocada" && ` (antes Fls. ${l.antigaPos})`}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">
+              {deslocadas === 0
+                ? "Nenhuma folha existente será renumerada."
+                : `${deslocadas} folha(s) serão renumeradas: Fls. ${Number(posicao)}–${pecasExistentes.length} passam a Fls. ${Number(posicao) + 1}–${total}.`}
+            </p>
           </div>
 
           <DialogFooter>
