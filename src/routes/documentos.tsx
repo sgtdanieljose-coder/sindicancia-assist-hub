@@ -198,11 +198,26 @@ function Documentos() {
               <div key={j.id} className="space-y-1">
                 <p className="text-sm font-medium">
                   Juntada nº {j.numero} — {j.titulo}
+                  {j.url && (
+                    <a
+                      href={j.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 inline-flex items-center text-primary hover:underline"
+                    >
+                      <ExternalLink className="size-3.5" />
+                    </a>
+                  )}
                 </p>
                 <ul className="space-y-0.5 pl-3">
                   {j.anexos.map((a) => (
                     <li key={a.fileId} className="truncate text-sm text-muted-foreground">
-                      <a href={a.url} target="_blank" rel="noreferrer" className="hover:text-primary">
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-primary"
+                      >
                         {a.nome}
                       </a>
                     </li>
@@ -282,8 +297,15 @@ function Documentos() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Arquivo</Label>
-              <Input type="file" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
+              <Label>Arquivo (foto ou PDF)</Label>
+              <Input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Fotos ficam incorporadas no texto da juntada; PDFs viram um link clicável.
+              </p>
             </div>
           </div>
 
