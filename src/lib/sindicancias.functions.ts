@@ -477,3 +477,105 @@ export const desfazerInsercao = createServerFn({ method: "POST" })
     await updateRow(linha, sindicanciaToRow(atual));
     return { removido: alvo.titulo, total: atual.documentos.length };
   });
+
+/** Lista o histórico de versões de uma peça (mais recente primeiro). */
+export const listarVersoes = createServerFn({ method: "POST" })
+  .inputValidator((data: { sindicanciaId: string; documentId: string }) => data)
+  .handler(async ({ data }) => {
+    const { atual } = await carregar(data.sindicanciaId);
+    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
+    return { versoes: [...(alvo?.versoes ?? [])].reverse() };
+  });
+
+/**
+ * Restaura uma versão anterior do texto da peça: reescreve o documento individual, guarda o
+ * texto atual como nova versão (para poder voltar atrás) e reconstrói o documento único.
+ */
+export const restaurarVersao = createServerFn({ method: "POST" })
+  .inputValidator(
+    (data: {
+      sindicanciaId: string;
+      documentId: string;
+      versaoId: string;
+      pecaId?: string;
+    }) => data,
+  )
+  .handler(async ({ data }) => {
+    const {
+      updateDocContent,
+      updateRow,
+      ensureAutosDoc,
+      rebuildAutos,
+      getDocText,
+      formatarPecaBasica,
+    } = await import("./google.server");
+
+    const { atual, linha } = await carregar(data.sindicanciaId);
+    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
+    if (!alvo) throw new Error("Peça não localizada nos autos.");
+    const versao = (alvo.versoes ?? []).find((v) => v.id === data.versaoId);
+    if (!versao) throw new Error("Versão não localizada no histórico desta peça.");
+
+    let atualTexto = "";
+    try {
+      atualTexto = await getDocText(data.documentId);
+    } catch (e) {
+      console.warn("Não foi possível ler o texto atual da peça:", e);
+    }
+
+    await updateDocContent(data.documentId, versao.texto);
+
+    let avisoFormatacao: string | undefined;
+    try {
+      await formatarPecaBasica(data.documentId, alvo.pecaId ?? data.pecaId);
+    } catch (e) {
+      avisoFormatacao = e instanceof Error ? e.message : "Falha ao formatar a peça restaurada.";
+    }
+
+    atual.documentos = atual.documentos.map((d) =>
+      d.documentId === data.documentId
+        ? {
+            ...d,
+            versoes: novaVersao(d.versoes, atualTexto, versao.texto).filter(
+              (v) => v.id !== versao.id,
+            ),
+          }
+        : d,
+    );
+
+    try {
+      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+      atual.autosDocId = autos.documentId;
+      atual.autosUrl = autos.url;
+      const pecas: {
+        pecaId?: string;
+        titulo: string;
+        tituloInterno?: string;
+        texto: string;
+        anexos?: AnexoJuntada[];
+      }[] = [];
+      for (const d of atual.documentos) {
+        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+          : undefined;
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: d.documentId === data.documentId ? versao.texto : await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
+      }
+      await rebuildAutos(autos.documentId, pecas);
+    } catch (e) {
+      console.warn("Falha ao reconstruir o documento único após restaurar a versão:", e);
+    }
+
+    try {
+      await updateRow(linha, sindicanciaToRow(atual));
+    } catch (e) {
+      console.warn("Falha ao registrar a restauração na planilha:", e);
+    }
+
+    return { texto: versao.texto, avisoFormatacao };
+  });
