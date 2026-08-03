@@ -63,6 +63,7 @@ const vazia: Sindicancia = {
   documentos: [],
   atualizadoEm: "",
   local: "",
+  localTrabalhos: "",
   subordinacao: "",
   omInstauradora: "",
   juntadas: [],
@@ -259,6 +260,11 @@ function Dashboard() {
               label="OM Instauradora"
               value={form.omInstauradora}
               onChange={(v) => set("omInstauradora", v)}
+            />
+            <Campo
+              label="Local dos Trabalhos (oitivas)"
+              value={form.localTrabalhos}
+              onChange={(v) => set("localTrabalhos", v)}
             />
             <Campo
               label="Autoridade Instauradora"
