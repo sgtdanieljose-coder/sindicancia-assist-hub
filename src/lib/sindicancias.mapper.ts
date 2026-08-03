@@ -35,6 +35,8 @@ export function rowToSindicancia(row: string[]): Sindicancia {
     autosUrl: row[21] || undefined,
     juntadas: safeParse<Juntada[]>(row[22], []),
     prazoProrrogadoDias: row[23] ? Number(row[23]) || 0 : 0,
+    localTrabalhos: row[24] ?? "",
+
   };
 }
 
