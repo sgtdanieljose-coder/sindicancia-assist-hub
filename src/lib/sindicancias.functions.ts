@@ -1,464 +1,580 @@
-import { createServerFn } from "@tanstack/react-start";
-import {
-  gerarTextoJuntada,
-  type AnexoJuntada,
-  type Juntada,
-  type Sindicancia,
-} from "./pecas";
-import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
-import { carregar } from "./sindicancias.server";
+export type AnexoJuntada = {
+  id: string;
+  /** Texto digitado livremente — pode ter vírgula, dois-pontos etc., ao contrário do nome do arquivo. */
+  descricao: string;
+  /** Presentes só quando um arquivo foi anexado a este item. */
+  fileId?: string;
+  url?: string;
+  mimeType?: string;
+  nomeArquivo?: string;
+  /** Documento (folha própria) deste anexo específico, se houver arquivo. */
+  documentId?: string;
+  docUrl?: string;
+};
 
-/**
- * Cria/atualiza o Google Doc de uma juntada específica (termo + lista de anexos + fotos/PDFs
- * incorporados), registra em atual.documentos (participando da paginação normal dos autos) e
- * reconstrói o documento único. Usado tanto ao criar a juntada quanto ao anexar um arquivo
- * novo — a cada chamada, o conteúdo é regenerado do zero a partir de atual.juntadas, então
- * fica sempre consistente com os anexos realmente cadastrados.
- */
-async function sincronizarDocumentoJuntada(
-  atual: Sindicancia,
-  juntadaId: string,
-): Promise<Sindicancia> {
-  const {
-    createDoc,
-    updateDocContent,
-    formatarPecaBasica,
-    inserirAnexoNoFimDoDocumento,
-    ensureAutosDoc,
-    rebuildAutos,
-    getDocText,
-  } = await import("./google.server");
+export type Juntada = {
+  id: string;
+  numero: number;
+  titulo: string;
+  data: string;
+  anexos: AnexoJuntada[];
+  /** Documento (Google Docs) desta juntada — termo + lista de anexos incorporada. */
+  documentId?: string;
+  url?: string;
+};
 
-  const juntada = atual.juntadas.find((j) => j.id === juntadaId);
-  if (!juntada) return atual;
+export type Sindicancia = {
+  id: string;
+  nup: string;
+  portariaNumero: string;
+  portariaData: string;
+  om: string;
+  autoridade: string;
+  sindicante: string;
+  sindicado: string;
+  objeto: string;
+  status: string;
+  etapas: string[];
+  documentos: {
+    titulo: string;
+    documentId: string;
+    url: string;
+    pecaId?: string;
+    /** Título literal esperado DENTRO do corpo do texto (quando difere do TITULOS_PECA
+     *  estático — ex.: cada juntada tem seu próprio "JUNTADA Nº N"). */
+    tituloInterno?: string;
+  }[];
+  atualizadoEm: string;
+  /** Pasta da sindicância no Drive (nome = NUP), criada automaticamente ao salvar. */
+  pastaId?: string;
+  pastaUrl?: string;
+  /** Subpasta "Anexos" dentro da pasta da sindicância. */
+  anexosId?: string;
+  anexosUrl?: string;
+  /** Cidade/localidade em que os atos são lavrados. */
+  local: string;
+  /** Local específico dos trabalhos (onde serão feitas as oitivas) — ex.: sala/prédio, distinto da cidade. */
+  localTrabalhos: string;
+  /** Subordinação da OM (ex.: "12ª Brigada de Infantaria Leve"). */
+  subordinacao: string;
+  /** OM instauradora (comando que expediu a portaria). */
+  omInstauradora: string;
+  /** Documento único (autos paginados) no Google Docs. */
+  autosDocId?: string;
+  autosUrl?: string;
+  /** Juntadas do processo, cada uma com seus anexos vinculados ao NUP. */
+  juntadas: Juntada[];
+  /** Dias adicionais concedidos por prorrogação (somados aos 30 dias corridos regulamentares). */
+  prazoProrrogadoDias?: number;
+};
 
-  const pecaId = `juntada-${juntada.id}`;
-  const tituloInterno = `JUNTADA Nº ${juntada.numero}`;
-  const tituloDoc = `${tituloInterno} — ${atual.nup || atual.id}`;
-  const conteudo = gerarTextoJuntada(atual, juntada);
+export const PRAZO_BASE_DIAS = 30;
+export const PRAZO_ALERTA_ANTECEDENCIA_DIAS = 10;
 
-  const existente = atual.documentos.find((d) => d.pecaId === pecaId);
-  const doc = existente
-    ? await updateDocContent(existente.documentId, conteudo)
-    : await createDoc(tituloDoc, conteudo, atual.pastaId);
-
-  atual.documentos = existente
-    ? atual.documentos.map((d) =>
-        d.documentId === existente.documentId ? { ...d, titulo: tituloDoc, tituloInterno } : d,
-      )
-    : [
-        ...atual.documentos,
-        { titulo: tituloDoc, documentId: doc.documentId, url: doc.url, pecaId, tituloInterno },
-      ];
-
-  atual.juntadas = atual.juntadas.map((j) =>
-    j.id === juntada.id ? { ...j, documentId: doc.documentId, url: doc.url } : j,
-  );
-
-  try {
-    await formatarPecaBasica(doc.documentId, pecaId, tituloInterno);
-  } catch (e) {
-    console.warn("Falha ao formatar a juntada:", e);
-  }
-
-  try {
-for (const anexo of juntada.anexos) {
-      if (!anexo.fileId || !anexo.url) continue;
-      await inserirAnexoNoFimDoDocumento(doc.documentId, {
-        fileId: anexo.fileId,
-        url: anexo.url,
-        mimeType: anexo.mimeType,
-        nomeArquivo: anexo.nomeArquivo ?? anexo.descricao,
-      });
-    }
-  } catch (e) {
-    console.warn("Falha ao incorporar anexos na juntada:", e);
-  }
-
-  try {
-    const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
-    atual.autosDocId = autos.documentId;
-    atual.autosUrl = autos.url;
-
-    const pecas: {
-      pecaId?: string;
-      titulo: string;
-      tituloInterno?: string;
-      texto: string;
-      anexos?: AnexoJuntada[];
-    }[] = [];
-    for (const d of atual.documentos) {
-      const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-        ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-        : undefined;
-      if (d.documentId === doc.documentId) {
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: conteudo,
-          anexos: juntadaDoItem?.anexos,
-        });
-      } else {
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: await getDocText(d.documentId),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-    }
-    await rebuildAutos(autos.documentId, pecas);
-  } catch (e) {
-    console.warn("Falha ao atualizar o documento único dos autos:", e);
-  }
-
-  return atual;
+/** Prazo total (dias corridos), somando eventual prorrogação já registrada. */
+export function prazoTotalDias(s: Pick<Sindicancia, "prazoProrrogadoDias">): number {
+  return PRAZO_BASE_DIAS + (s.prazoProrrogadoDias || 0);
 }
 
-export const listarSindicancias = createServerFn({ method: "GET" }).handler(async () => {
-  const { readRows } = await import("./google.server");
-  try {
-    const rows = await readRows();
-    return { itens: rows.map(rowToSindicancia), erro: null as string | null };
-  } catch (e) {
-    return { itens: [] as Sindicancia[], erro: (e as Error).message };
+export const ETAPAS = [
+  "Recebimento da Portaria de instauração",
+  "Autuação (Capa dos Autos de Sindicância)",
+  "Termo de Abertura dos Trabalhos",
+  "Despacho inicial",
+  "Notificação prévia do sindicado",
+  "Juntada de documentos",
+  "Inquirição de testemunhas",
+  "Depoimento do sindicado",
+  "Diligências complementares",
+  "Encerramento da instrução",
+  "Alegações finais",
+  "Relatório do Sindicante",
+  "Remessa à autoridade instauradora",
+];
+
+export const STATUS = [
+  "Em instrução",
+  "Aguardando alegações finais",
+  "Em relatório",
+  "Prorrogada",
+  "Concluída",
+] as const;
+
+export const PECAS = [
+  {
+    id: "autos",
+    nome: "Autos de Sindicância (Capa)",
+    unica: true,
+    etapa: "Autuação (Capa dos Autos de Sindicância)",
+  },
+  {
+    id: "abertura",
+    nome: "Termo de Abertura dos Trabalhos",
+    unica: true,
+    etapa: "Termo de Abertura dos Trabalhos",
+  },
+  {
+    id: "despacho-inicial",
+    nome: "Despacho Inicial",
+    unica: true,
+    etapa: "Despacho inicial",
+  },
+  {
+    id: "despacho-diversos",
+    nome: "Despachos Diversos",
+    unica: false,
+    etapa: undefined,
+  },
+  {
+    id: "notificacao",
+    nome: "Notificação Prévia do Sindicado",
+    unica: true,
+    etapa: "Notificação prévia do sindicado",
+  },
+  {
+    id: "inquiricao",
+    nome: "Termo de Inquirição de Testemunha",
+    unica: false,
+    etapa: "Inquirição de testemunhas",
+  },
+  {
+    id: "depoimento",
+    nome: "Termo de Depoimento do Sindicado",
+    unica: true,
+    etapa: "Depoimento do sindicado",
+  },
+  { id: "oficio", nome: "Ofício / Mandado de Intimação", unica: false, etapa: undefined },
+  {
+    id: "encerramento",
+    nome: "Termo de Encerramento da Instrução",
+    unica: true,
+    etapa: "Encerramento da instrução",
+  },
+  {
+    id: "alegacoes",
+    nome: "Notificação para Alegações Finais",
+    unica: true,
+    etapa: "Alegações finais",
+  },
+  { id: "prorrogacao", nome: "Pedido de Prorrogação de Prazo", unica: false, etapa: undefined },
+] as const;
+
+export type PecaId = (typeof PECAS)[number]["id"];
+
+export type PecaCampos = {
+  local: string;
+  data: string;
+  hora: string;
+  destinatario: string;
+  qualificacao: string;
+  documentos: string;
+  perguntas: string;
+  respostas: string;
+  justificativa: string;
+  prazoDias: string;
+  numeroOficio: string;
+};
+
+export function diasCorridos(dataInicio: string) {
+  if (!dataInicio) return 0;
+  const inicio = new Date(`${dataInicio}T00:00:00`);
+  if (Number.isNaN(inicio.getTime())) return 0;
+  const hoje = new Date();
+  return Math.floor((hoje.getTime() - inicio.getTime()) / 86_400_000);
+}
+
+const EXTENSO_NUM = [
+  "zero",
+  "um",
+  "dois",
+  "três",
+  "quatro",
+  "cinco",
+  "seis",
+  "sete",
+  "oito",
+  "nove",
+  "dez",
+  "onze",
+  "doze",
+  "treze",
+  "quatorze",
+  "quinze",
+  "dezesseis",
+  "dezessete",
+  "dezoito",
+  "dezenove",
+  "vinte",
+  "vinte e um",
+  "vinte e dois",
+  "vinte e três",
+  "vinte e quatro",
+  "vinte e cinco",
+  "vinte e seis",
+  "vinte e sete",
+  "vinte e oito",
+  "vinte e nove",
+  "trinta",
+  "trinta e um",
+];
+
+const MESES = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+
+function anoExtenso(ano: number) {
+  // Ex.: 2026 -> "dois mil e vinte e seis"
+  const milhar = Math.floor(ano / 1000);
+  const resto = ano % 1000;
+  const base = milhar === 2 ? "dois mil" : `${EXTENSO_NUM[milhar] ?? milhar} mil`;
+  if (resto === 0) return base;
+  const centena = Math.floor(resto / 100);
+  const dezena = resto % 100;
+  const centenas = [
+    "",
+    "cento",
+    "duzentos",
+    "trezentos",
+    "quatrocentos",
+    "quinhentos",
+    "seiscentos",
+    "setecentos",
+    "oitocentos",
+    "novecentos",
+  ][centena];
+  const partes = [centenas, dezena ? (EXTENSO_NUM[dezena] ?? `${dezena}`) : ""].filter(Boolean);
+  return `${base} e ${partes.join(" e ")}`;
+}
+
+/** "Aos vinte e três dias do mês de julho de dois mil e vinte e seis" */
+export function dataPorExtenso(iso: string) {
+  if (!iso) return "____ dias do mês de __________ de ______";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const dia = d.getDate();
+  return `${EXTENSO_NUM[dia] ?? dia} dias do mês de ${MESES[d.getMonth()]} de ${anoExtenso(d.getFullYear())}`;
+}
+
+function dataExtenso(iso: string) {
+  if (!iso) return "____ de __________ de ______";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+const linha = "_".repeat(66);
+
+// ====================================================================================
+// Convenção de formatação-base de TODA peça (documento individual e a cópia dela dentro
+// do documento único dos autos — aplicada em src/lib/google.server.ts, que usa a MESMA
+// lógica nos dois lugares para nunca ficarem dessincronizados):
+//   1) Brasão da República no topo.
+//   2) Cabeçalho institucional (timbre / Subordinação) em negrito e centralizado.
+//   3) 4 linhas em branco entre o cabeçalho e o título da peça — ver ESPACO_ANTES_TITULO.
+//   4) Título da peça em negrito, sublinhado e centralizado.
+//   5) Corpo do texto (peças com parágrafo narrativo) justificado, com recuo de 1ª linha.
+//   6) Assinatura ao final: nome centralizado (peso normal) e a função/cargo (ex.:
+//      "Sindicante") centralizada e em negrito — sempre as duas últimas linhas não vazias.
+//
+// Ao escrever uma peça nova: comece o corpo com ...ESPACO_ANTES_TITULO, "TÍTULO DA PEÇA",
+// "", <corpo>, e cadastre esse título literal em TITULOS_PECA (google.server.ts) — o resto
+// (negrito/centralização/sublinhado/justificado/assinatura, nos dois documentos) é automático.
+// ====================================================================================
+
+/** Linhas em branco padrão entre o cabeçalho institucional e o título de qualquer peça. */
+const ESPACO_ANTES_TITULO = ["", "", "", ""];
+
+/** Cabeçalho institucional obrigatório — o brasão é inserido como imagem acima destas linhas. */
+export function cabecalho(s: Sindicancia) {
+  const linhasSubordinacao = (s.subordinacao || "Subordinação")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return ["MINISTÉRIO DA DEFESA", "EXÉRCITO BRASILEIRO", ...linhasSubordinacao, ""].join("\n");
+}
+
+function subcabecalhoProcesso(s: Sindicancia) {
+  return [
+    `SINDICÂNCIA — NUP/NUD ${s.nup || "____________"}`,
+    `Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}`,
+    linha,
+    "",
+  ].join("\n");
+}
+
+/** A função/cargo (última linha) vira negrito automaticamente — ver requestsAssinatura. */
+function assinatura(s: Sindicancia) {
+  return [
+    "",
+    "",
+    (s.sindicante || "Posto/Grad e Nome de Guerra").toUpperCase(),
+    "Sindicante",
+    "",
+  ].join("\n");
+}
+
+export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
+  const local = c.local || s.local || "____________";
+  // Oitivas (inquirição/depoimento) usam o local específico dos trabalhos quando preenchido.
+  const localOitiva = c.local || s.localTrabalhos || s.local || "____________";
+  const head = cabecalho(s);
+
+  if (peca === "autos") {
+    return [
+      head.replace(/\n+$/, ""),
+      ...ESPACO_ANTES_TITULO,
+      "AUTOS DE SINDICÂNCIA",
+      "",
+      "",
+      "",
+      `NUP: ${s.nup || "____________"}`,
+      "",
+      `SINDICANTE: ${s.sindicante || "____________"}`,
+      "",
+      `SINDICADO: ${s.sindicado || "____________"}`,
+      "",
+      `OBJETO: ${s.objeto || "____________"}`,
+      "",
+    ].join("\n");
   }
-});
 
-export const salvarSindicancia = createServerFn({ method: "POST" })
-  .inputValidator((data: Sindicancia) => data)
-  .handler(async ({ data }) => {
-    const { readRows, appendRow, updateRow, ensureSindicanciaFolders } =
-      await import("./google.server");
-    const registro: Sindicancia = { ...data, id: data.id || `SIND-${Date.now()}` };
-    const rows = await readRows();
-    const idx = rows.findIndex((r) => r[0] === registro.id);
-
-    // Cria a pasta da sindicância (nome = NUP) com a subpasta "Anexos" no Drive.
-    if (registro.nup?.trim() && !registro.pastaId) {
-      try {
-        const pastas = await ensureSindicanciaFolders(registro.nup);
-        registro.pastaId = pastas.pastaId;
-        registro.pastaUrl = pastas.pastaUrl;
-        registro.anexosId = pastas.anexosId;
-        registro.anexosUrl = pastas.anexosUrl;
-      } catch (e) {
-        console.warn("Não foi possível criar a pasta da sindicância no Drive:", e);
+  const corpo = (() => {
+    switch (peca) {
+      case "abertura": {
+        const dataTxt = c.data ? dataPorExtenso(c.data) : "“data por extenso”";
+        const localTxt = c.local || s.local || "“local adicionado na base de dados”";
+        const omTxt = s.om || "“OM adicionada na base de dados”";
+        const portariaTxt = s.portariaNumero || "“Portaria adicionada na base”";
+        const autoridadeTxt = s.autoridade || "“Autoridade Instauradora da base de dados”";
+        const omInstTxt =
+          s.omInstauradora || s.om || "“OM Instauradora adicionada na base de dados”";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "TERMO DE ABERTURA",
+          "",
+          `Aos ${dataTxt} nesta cidade de ${localTxt}, no quartel do ${omTxt}, em cumprimento ao determinado na Portaria nº ${portariaTxt}, do Sr ${autoridadeTxt}, Comandante do ${omInstTxt}, faço a abertura dos trabalhos atinentes a presente sindicância, do que, para constar, lavrei o presente termo.`,
+        ].join("\n");
       }
-    }
 
-    const row = sindicanciaToRow(registro);
-    if (idx >= 0) {
-      await updateRow(idx + 2, row);
-    } else {
-      await appendRow(row);
+      case "despacho-inicial": {
+        const sindicadoTxt = s.sindicado || "“sindicado adicionado na base de dados”";
+        const portariaTxt = s.portariaNumero || "“Portaria adicionada na base”";
+        const dataPortariaTxt = s.portariaData ? dataExtenso(s.portariaData) : "“data da portaria”";
+        const autoridadeTxt = s.autoridade || "“Autoridade Instauradora da base de dados”";
+        const omTxt = s.om || "“OM adicionada na base de dados”";
+        const dataOitivaTxt = c.data ? dataExtenso(c.data) : "“data designada”";
+        const horaTxt = c.hora || "__:__";
+        const localOitivaTxt = s.localTrabalhos || "“local dos trabalhos”";
+        const fechamentoData = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "DESPACHO",
+          "",
+          `Oficiar ao(à) ${sindicadoTxt}, sindicado, notificando previamente sobre a instauração da sindicância referente à Portaria nº ${portariaTxt}, de ${dataPortariaTxt}, do Sr ${autoridadeTxt}, Comandante do ${omTxt}.`,
+          "",
+          `Oficiar ao Sr. Comandante da “subunidade do sindicado”, com a finalidade de autorizar o comparecimento do ${sindicadoTxt}, com a finalidade de ser inquirido como sindicado.`,
+          "",
+          `Oficiar ao Chefe da “seção competente”, com a finalidade de solicitar “documento necessário”.`,
+          "",
+          `Designo o dia ${dataOitivaTxt}, às ${horaTxt} horas, a fim de ser ouvido o sindicado ${sindicadoTxt}, em ${localOitivaTxt}.`,
+          "",
+          "",
+          `Quartel em ${s.local || "____________"}, ${fechamentoData}.`,
+        ].join("\n");
+      }
+
+      case "despacho-diversos": {
+        const fechamentoData = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "DESPACHO",
+          "",
+          c.justificativa || "“conteúdo do despacho”",
+          "",
+          "",
+          `Quartel em ${s.local || "____________"}, ${fechamentoData}.`,
+        ].join("\n");
+      }
+
+      case "notificacao":
+        return [
+          subcabecalhoProcesso(s),
+          "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
+          "",
+          `Notifico V. S.ª, ${s.sindicado || "Posto/Grad e Nome de Guerra do sindicado"}, ${c.qualificacao || "qualificação"}, de que responde à presente Sindicância, instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, tendo por objeto ${s.objeto || "os fatos nela descritos"}.`,
+          "",
+          "Fica assegurado o direito ao contraditório e à ampla defesa, podendo acompanhar todos os atos do procedimento, pessoalmente ou por procurador, arrolar testemunhas, requerer diligências e produzir provas em direito admitidas.",
+          "",
+          `Deverá comparecer no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, a fim de ser ouvido em declarações.`,
+        ].join("\n");
+
+      case "inquiricao":
+        return [
+          subcabecalhoProcesso(s),
+          "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
+          "",
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${localOitiva}, presente o Sindicante, compareceu ${c.destinatario || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de testemunha, advertido(a) das penas cominadas ao falso testemunho, prometeu dizer a verdade do que soubesse e lhe fosse perguntado.`,
+          "",
+          "PERGUNTAS FORMULADAS:",
+          c.perguntas || "1) ...",
+          "",
+          "RESPOSTAS:",
+          c.respostas || "1) ...",
+          "",
+          "Nada mais havendo, encerrou-se o presente termo, lido e achado conforme, que vai assinado pelo Sindicante e pelo(a) depoente.",
+          "",
+          "",
+          "____________________________________",
+          "Depoente",
+        ].join("\n");
+
+      case "depoimento":
+        return [
+          subcabecalhoProcesso(s),
+          "TERMO DE DECLARAÇÕES DO SINDICADO",
+          "",
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${localOitiva}, presente o Sindicante, compareceu ${s.sindicado || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de sindicado, cientificado do direito ao silêncio, ao contraditório e à ampla defesa, respondeu:`,
+          "",
+          "PERGUNTAS FORMULADAS:",
+          c.perguntas || "1) ...",
+          "",
+          "RESPOSTAS:",
+          c.respostas || "1) ...",
+          "",
+          "Nada mais havendo, encerrou-se o presente termo, lido e achado conforme.",
+          "",
+          "",
+          "____________________________________",
+          "Sindicado",
+        ].join("\n");
+
+      case "oficio":
+        return [
+          subcabecalhoProcesso(s),
+          `Ofício nr ${c.numeroOficio || "____"} - Sind ${s.nup || ""}`,
+          "",
+          `Ao Senhor ${c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade"}`,
+          `${c.qualificacao || "Função / Endereço"}`,
+          "",
+          "Assunto: Intimação para comparecimento",
+          "",
+          `1. Na condição de Sindicante da Sindicância instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, solicito a V. S.ª as providências necessárias ao comparecimento no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}.`,
+          "",
+          `2. ${c.justificativa || "A medida destina-se à instrução do procedimento, nos termos da EB10-IG-09.001."}`,
+          "",
+          "3. Coloco-me à disposição para os esclarecimentos que se fizerem necessários.",
+        ].join("\n");
+
+      case "encerramento":
+        return [
+          subcabecalhoProcesso(s),
+          "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
+          "",
+          `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, o Sindicante declara encerrada a fase instrutória do procedimento instaurado pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, havendo sido produzidas todas as provas reputadas necessárias ao esclarecimento dos fatos.`,
+          "",
+          `${c.justificativa || "Não subsistem diligências pendentes."}`,
+          "",
+          "Determino a notificação do sindicado para apresentação de alegações finais, nos termos da EB10-IG-09.001.",
+        ].join("\n");
+
+      case "alegacoes":
+        return [
+          subcabecalhoProcesso(s),
+          "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
+          "",
+          `Notifico V. S.ª, ${s.sindicado || "Posto/Grad e Nome de Guerra"}, do encerramento da instrução da Sindicância instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}.`,
+          "",
+          `Fica facultada a apresentação de ALEGAÇÕES FINAIS, por escrito, no prazo de ${c.prazoDias || "5"} (____) dias, contados do recebimento desta, franqueada vista dos autos.`,
+          "",
+          "O silêncio não implicará confissão, prosseguindo o feito em seus ulteriores termos.",
+        ].join("\n");
+
+      case "prorrogacao":
+        return [
+          subcabecalhoProcesso(s),
+          "PEDIDO DE PRORROGAÇÃO DE PRAZO",
+          "",
+          `Ao(À) ${s.autoridade || "Autoridade Instauradora"}, Comandante do ${s.omInstauradora || s.om || "OM Instauradora"}`,
+          "",
+          `1. Solicito a prorrogação do prazo para conclusão da Sindicância instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, por mais ${c.prazoDias || "20"} (____) dias corridos.`,
+          "",
+          `2. Justificativa: ${c.justificativa || "necessidade de realização de diligências imprescindíveis à elucidação dos fatos, ainda pendentes de conclusão."}`,
+          "",
+          "3. O pedido encontra amparo na Portaria C Ex nr 2.394/2024 (EB10-IG-09.001).",
+          "",
+          "4. Nestes termos, peço deferimento.",
+        ].join("\n");
+
+      default:
+        return "";
     }
-    return rowToSindicancia(row);
-  });
+  })();
+
+  return `${head}${corpo}\n${assinatura(s)}`;
+}
 
 /**
- * Exporta a peça: cria (ou, se for peça "única" já exportada antes, atualiza) o documento
- * individual e reinsere a peça no documento único dos autos, mantendo a posição já escolhida
- * quando for uma atualização.
+ * Gera o texto de uma juntada específica (com numeração própria, ex.: "JUNTADA Nº 2"),
+ * listando os anexos já enviados. Segue a mesma convenção de formatação-base das demais
+ * peças; as fotos/PDFs em si são incorporados depois, sobre o Google Doc já criado — ver
+ * inserirAnexosNaJuntada em google.server.ts.
  */
-export const exportarParaDocs = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: {
-      sindicanciaId: string;
-      titulo: string;
-      conteudo: string;
-      posicao?: number;
-      pecaId?: string;
-      unica?: boolean;
-      etapa?: string;
-    }) => data,
-  )
-  .handler(async ({ data }) => {
-    const {
-      createDoc,
-      updateDocContent,
-      updateRow,
-      ensureAutosDoc,
-      ensureSindicanciaFolders,
-      arquivoAtivo,
-      rebuildAutos,
-      getDocText,
-      formatarPecaBasica,
-    } = await import("./google.server");
+export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
+  const titulo = `JUNTADA Nº ${j.numero}`;
+  const listaAnexos = j.anexos.length
+    ? j.anexos.map((a, i) => `${i + 1}. ${a.descricao}`).join("\n\n")
+    : "(nenhum item juntado até o momento)";
 
-    const { atual, linha } = await carregar(data.sindicanciaId);
+  const corpo = [
+    ...ESPACO_ANTES_TITULO,
+    titulo,
+    "",
+    `Aos ${dataPorExtenso(j.data)}, nesta cidade de ${s.local || "____________"}, no quartel do ${s.om || "OM"}, faço a juntada aos autos da presente sindicância dos documentos a seguir especificados, do que, para constar, lavrei o presente termo.`,
+    "",
+    listaAnexos,
+  ].join("\n");
 
-    // A pasta da sindicância pode ter sido apagada/movida pra lixeira no Drive por fora do
-    // app — nesse caso o ID salvo fica "morto" e os próximos documentos seriam criados fora
-    // dela sem avisar ninguém. Confere e recria antes de seguir.
-    if (atual.nup?.trim() && !(await arquivoAtivo(atual.pastaId))) {
-      try {
-        const pastas = await ensureSindicanciaFolders(atual.nup);
-        atual.pastaId = pastas.pastaId;
-        atual.pastaUrl = pastas.pastaUrl;
-        atual.anexosId = pastas.anexosId;
-        atual.anexosUrl = pastas.anexosUrl;
-      } catch (e) {
-        console.warn("Não foi possível recriar a pasta da sindicância no Drive:", e);
-      }
-    }
+  return `${cabecalho(s)}${corpo}\n${assinatura(s)}`;
+}
 
-    // Peça "única" (ex.: Termo de Abertura) já exportada antes? Atualiza o mesmo documento,
-    // na mesma posição, em vez de criar mais um Google Doc duplicado — a menos que o
-    // documento individual tenha sido apagado/perdido no Drive, caso em que é recriado na
-    // mesma posição em vez de silenciosamente não fazer nada.
-    const existenteBruto =
-      data.unica && data.pecaId
-        ? atual.documentos.find((d) => d.pecaId === data.pecaId)
-        : undefined;
-    const existenteAtivo =
-      existenteBruto && (await arquivoAtivo(existenteBruto.documentId))
-        ? existenteBruto
-        : undefined;
+export type Relatorio = {
+  introducao: string;
+  diligencias: string;
+  analise: string;
+  conclusao: string;
+};
 
-    let lista = [...atual.documentos];
-    let doc: { documentId: string; url: string; embedUrl: string };
-    let pos: number;
-
-    if (existenteAtivo) {
-      doc = await updateDocContent(existenteAtivo.documentId, data.conteudo);
-      pos = lista.findIndex((d) => d.documentId === existenteAtivo.documentId) + 1;
-      lista = lista.map((d) =>
-        d.documentId === existenteAtivo.documentId ? { ...d, titulo: data.titulo } : d,
-      );
-    } else if (existenteBruto) {
-      doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
-      const idxAntigo = lista.findIndex((d) => d.documentId === existenteBruto.documentId);
-      pos = idxAntigo + 1;
-      lista[idxAntigo] = {
-        titulo: data.titulo,
-        documentId: doc.documentId,
-        url: doc.url,
-        pecaId: data.pecaId,
-      };
-    } else {
-      doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
-      const total = lista.length + 1;
-      pos = Math.min(Math.max(data.posicao ?? total, 1), total);
-      lista.splice(pos - 1, 0, {
-        titulo: data.titulo,
-        documentId: doc.documentId,
-        url: doc.url,
-        pecaId: data.pecaId,
-      });
-    }
-    atual.documentos = lista;
-
-    // Formatação-base (cabeçalho/título/assinatura) — mesma lógica usada no consolidado.
-    let avisoFormatacao: string | undefined;
-    try {
-      await formatarPecaBasica(doc.documentId, data.pecaId);
-    } catch (e) {
-      console.warn("Falha ao formatar a peça:", e);
-      avisoFormatacao = e instanceof Error ? e.message : "Falha desconhecida ao formatar a peça.";
-    }
-
-    // Marca automaticamente a etapa correspondente no checklist, se ainda não estiver marcada.
-    if (data.etapa && !atual.etapas.includes(data.etapa)) {
-      atual.etapas = [...atual.etapas, data.etapa];
-    }
-
-    // Documento único paginado.
-    let autosUrl = atual.autosUrl;
-    try {
-      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
-      atual.autosDocId = autos.documentId;
-      atual.autosUrl = autos.url;
-      autosUrl = autos.url;
-
-      const pecas: {
-        pecaId?: string;
-        titulo: string;
-        tituloInterno?: string;
-        texto: string;
-        anexos?: AnexoJuntada[];
-      }[] = [];
-      for (const d of lista) {
-        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-          : undefined;
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: d.documentId === doc.documentId ? data.conteudo : await getDocText(d.documentId),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-      await rebuildAutos(autos.documentId, pecas);
-    } catch (e) {
-      console.warn("Falha ao atualizar o documento único dos autos:", e);
-    }
-
-    try {
-      await updateRow(linha, sindicanciaToRow(atual));
-    } catch (e) {
-      console.warn("Falha ao registrar documento na planilha:", e);
-    }
-
-    return {
-      ...doc,
-      posicao: pos,
-      autosUrl,
-      atualizado: Boolean(existenteAtivo),
-      recriado: Boolean(existenteBruto) && !existenteAtivo,
-      avisoFormatacao,
-    };
-  });
-
-/** Cria uma nova juntada (numerada) vinculada ao NUP da sindicância, com seu próprio Google
- *  Doc (termo + lista de anexos), já inserido no documento único dos autos. Pode ser chamada
- *  quantas vezes forem necessárias — cada sindicância pode ter várias juntadas. */
-export const criarJuntada = createServerFn({ method: "POST" })
-  .inputValidator((data: { sindicanciaId: string; titulo: string; data: string }) => data)
-  .handler(async ({ data }) => {
-    const { updateRow } = await import("./google.server");
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
-    let atual = atualInicial;
-    const numero = (atual.juntadas?.length ?? 0) + 1;
-    const juntada: Juntada = {
-      id: `JUN-${Date.now()}`,
-      numero,
-      titulo: data.titulo || `Juntada nº ${numero}`,
-      data: data.data || new Date().toISOString().slice(0, 10),
-      anexos: [],
-    };
-    atual.juntadas = [...(atual.juntadas ?? []), juntada];
-    atual.documentos = atual.documentos ?? [];
-
-    atual = await sincronizarDocumentoJuntada(atual, juntada.id);
-
-    await updateRow(linha, sindicanciaToRow(atual));
-    return atual.juntadas.find((j) => j.id === juntada.id)!;
-  });
-
-/** Envia um anexo para a pasta "Anexos" do NUP, vincula-o a uma juntada e atualiza o Google
- *  Doc dela — fotos ficam incorporadas no texto, PDFs e demais tipos viram um link clicável. */
-export const adicionarAnexo = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: {
-      sindicanciaId: string;
-      juntadaId: string;
-      nome: string;
-      mimeType: string;
-      base64: string;
-    }) => data,
-  )
-  .handler(async ({ data }) => {
-    const { uploadAnexo, updateRow, ensureSindicanciaFolders, arquivoAtivo } =
-      await import("./google.server");
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
-    let atual = atualInicial;
-
-    let anexosId = atual.anexosId;
-    if (!(await arquivoAtivo(anexosId))) {
-      const pastas = await ensureSindicanciaFolders(atual.nup);
-      atual.pastaId = pastas.pastaId;
-      atual.pastaUrl = pastas.pastaUrl;
-      atual.anexosId = pastas.anexosId;
-      atual.anexosUrl = pastas.anexosUrl;
-      anexosId = pastas.anexosId;
-    }
-    if (!anexosId) {
-      throw new Error("Não foi possível localizar ou criar a pasta de anexos no Drive.");
-    }
-
-    const arquivo = await uploadAnexo({
-      nome: data.nome,
-      mimeType: data.mimeType,
-      base64: data.base64,
-      pastaId: anexosId,
-    });
-
-    atual.juntadas = (atual.juntadas ?? []).map((j) =>
-      j.id === data.juntadaId
-        ? {
-            ...j,
-            anexos: [
-              ...j.anexos,
-              {
-                id: `ANX-${Date.now()}`,
-                descricao: data.nome,
-                fileId: arquivo.fileId,
-                url: arquivo.url,
-                mimeType: arquivo.mimeType,
-                nomeArquivo: arquivo.nome,
-              } satisfies AnexoJuntada,
-            ],
-          }
-        : j,
-    );
-
-    atual = await sincronizarDocumentoJuntada(atual, data.juntadaId);
-
-    await updateRow(linha, sindicanciaToRow(atual));
-    return arquivo;
-  });
-
-/**
- * Desfaz a última inserção no documento único: remove a peça da lista dos autos, manda o
- * documento individual para a lixeira do Drive e reconstrói os autos com a numeração
- * corrigida. Usado pelo botão "Desfazer" logo após uma exportação confirmada sem querer.
- */
-export const desfazerInsercao = createServerFn({ method: "POST" })
-  .inputValidator((data: { sindicanciaId: string; documentId: string; etapa?: string }) => data)
-  .handler(async ({ data }) => {
-    const { updateRow, ensureAutosDoc, rebuildAutos, getDocText, moverParaLixeira } =
-      await import("./google.server");
-
-    const { atual, linha } = await carregar(data.sindicanciaId);
-    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
-    if (!alvo) throw new Error("A peça já não consta mais nos autos.");
-
-    atual.documentos = atual.documentos.filter((d) => d.documentId !== data.documentId);
-    if (alvo.pecaId?.startsWith("juntada-")) {
-      atual.juntadas = (atual.juntadas ?? []).filter((j) => `juntada-${j.id}` !== alvo.pecaId);
-    }
-    if (data.etapa) {
-      atual.etapas = (atual.etapas ?? []).filter((e) => e !== data.etapa);
-    }
-
-    try {
-      await moverParaLixeira(data.documentId);
-    } catch (e) {
-      console.warn("Falha ao mover o documento individual para a lixeira:", e);
-    }
-
-    try {
-      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
-      atual.autosDocId = autos.documentId;
-      atual.autosUrl = autos.url;
-      const pecas: {
-        pecaId?: string;
-        titulo: string;
-        tituloInterno?: string;
-        texto: string;
-        anexos?: AnexoJuntada[];
-      }[] = [];
-      for (const d of atual.documentos) {
-        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-          : undefined;
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: await getDocText(d.documentId),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-      await rebuildAutos(autos.documentId, pecas);
-    } catch (e) {
-      console.warn("Falha ao reconstruir o documento único após desfazer:", e);
-    }
-
-    await updateRow(linha, sindicanciaToRow(atual));
-    return { removido: alvo.titulo, total: atual.documentos.length };
-  });
+export function gerarRelatorio(s: Sindicancia, r: Relatorio, local: string, data: string) {
+  return [
+    cabecalho(s),
+    subcabecalhoProcesso(s),
+    "RELATÓRIO DO SINDICANTE",
+    "",
+    "1. INTRODUÇÃO",
+    r.introducao ||
+      `A presente Sindicância foi instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, da lavra do(a) ${s.autoridade || "Autoridade Instauradora"}, a fim de apurar ${s.objeto || "os fatos nela descritos"}.`,
+    "",
+    "2. DILIGÊNCIAS REALIZADAS",
+    r.diligencias || "a) ...",
+    "",
+    "3. ANÁLISE DOS FATOS",
+    r.analise || "...",
+    "",
+    "4. CONCLUSÃO",
+    r.conclusao || "...",
+    "",
+    `${local || s.local || "________________"}, ${dataExtenso(data)}.`,
+    assinatura(s),
+  ].join("\n");
+}
