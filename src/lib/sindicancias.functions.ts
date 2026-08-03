@@ -6,7 +6,7 @@ import {
   type Sindicancia,
 } from "./pecas";
 import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
-import { carregar } from "./sindicancias.server";
+import { carregar, novaVersao } from "./sindicancias.server";
 
 /**
  * Cria/atualiza o Google Doc de uma juntada específica (termo + lista de anexos + fotos/PDFs
