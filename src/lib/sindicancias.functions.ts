@@ -223,10 +223,23 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     let pos: number;
 
     if (existenteAtivo) {
+      // Guarda o texto que estava no documento antes de sobrescrever, para permitir restaurar.
+      let anterior = "";
+      try {
+        anterior = await getDocText(existenteAtivo.documentId);
+      } catch (e) {
+        console.warn("Não foi possível ler o texto anterior da peça:", e);
+      }
       doc = await updateDocContent(existenteAtivo.documentId, data.conteudo);
       pos = lista.findIndex((d) => d.documentId === existenteAtivo.documentId) + 1;
       lista = lista.map((d) =>
-        d.documentId === existenteAtivo.documentId ? { ...d, titulo: data.titulo } : d,
+        d.documentId === existenteAtivo.documentId
+          ? {
+              ...d,
+              titulo: data.titulo,
+              versoes: novaVersao(d.versoes, anterior, data.conteudo),
+            }
+          : d,
       );
     } else if (existenteBruto) {
       doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
@@ -237,6 +250,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
         documentId: doc.documentId,
         url: doc.url,
         pecaId: data.pecaId,
+        versoes: existenteBruto.versoes,
       };
     } else {
       doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
@@ -250,6 +264,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       });
     }
     atual.documentos = lista;
+
 
     // Formatação-base (cabeçalho/título/assinatura) — mesma lógica usada no consolidado.
     let avisoFormatacao: string | undefined;
