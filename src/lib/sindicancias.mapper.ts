@@ -66,5 +66,7 @@ export function sindicanciaToRow(s: Sindicancia): string[] {
     s.autosUrl ?? "",
     JSON.stringify(s.juntadas ?? []),
     String(s.prazoProrrogadoDias ?? 0),
+    s.localTrabalhos ?? "",
+
   ];
 }
