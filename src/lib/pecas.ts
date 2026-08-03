@@ -23,7 +23,15 @@ export type Juntada = {
   url?: string;
 };
 
+/** Snapshot do texto de uma peça, guardado a cada exportação/atualização. */
+export type VersaoPeca = {
+  id: string;
+  texto: string;
+  criadoEm: string;
+};
+
 export type Sindicancia = {
+
   id: string;
   nup: string;
   portariaNumero: string;
