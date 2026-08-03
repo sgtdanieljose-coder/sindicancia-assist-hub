@@ -23,7 +23,15 @@ export type Juntada = {
   url?: string;
 };
 
+/** Snapshot do texto de uma peça, guardado a cada exportação/atualização. */
+export type VersaoPeca = {
+  id: string;
+  texto: string;
+  criadoEm: string;
+};
+
 export type Sindicancia = {
+
   id: string;
   nup: string;
   portariaNumero: string;
@@ -43,7 +51,10 @@ export type Sindicancia = {
     /** Título literal esperado DENTRO do corpo do texto (quando difere do TITULOS_PECA
      *  estático — ex.: cada juntada tem seu próprio "JUNTADA Nº N"). */
     tituloInterno?: string;
+    /** Histórico de textos anteriores desta peça (mais antigo primeiro), para restauração. */
+    versoes?: VersaoPeca[];
   }[];
+
   atualizadoEm: string;
   /** Pasta da sindicância no Drive (nome = NUP), criada automaticamente ao salvar. */
   pastaId?: string;

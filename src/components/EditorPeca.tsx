@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, FileUp, Loader2, Undo2 } from "lucide-react";
+import { ExternalLink, FileUp, History, Loader2, RotateCcw, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { desfazerInsercao, exportarParaDocs } from "@/lib/sindicancias.functions";
+import {
+  desfazerInsercao,
+  exportarParaDocs,
+  listarVersoes,
+  restaurarVersao,
+} from "@/lib/sindicancias.functions";
 
 type Props = {
   titulo: string;
@@ -33,6 +38,7 @@ type Props = {
   onChange: (texto: string) => void;
   onExportado?: () => void;
 };
+
 
 export function EditorPeca({
   titulo,
@@ -116,6 +122,35 @@ export function EditorPeca({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const documentIdAtual = existente?.documentId ?? null;
+  const [historicoAberto, setHistoricoAberto] = useState(false);
+
+  const versoes = useQuery({
+    queryKey: ["versoes-peca", sindicanciaId, documentIdAtual],
+    enabled: Boolean(documentIdAtual),
+    queryFn: () =>
+      listarVersoes({ data: { sindicanciaId, documentId: documentIdAtual as string } }),
+  });
+
+  const restaurar = useMutation({
+    mutationFn: (versaoId: string) =>
+      restaurarVersao({
+        data: { sindicanciaId, documentId: documentIdAtual as string, versaoId, pecaId },
+      }),
+    onSuccess: (d) => {
+      onChange(d.texto);
+      setHistoricoAberto(false);
+      void versoes.refetch();
+      toast.success("Versão anterior restaurada — peça e autos atualizados.");
+      if (d.avisoFormatacao) {
+        toast.warning(`Texto restaurado, mas a formatação falhou: ${d.avisoFormatacao}`);
+      }
+      onExportado?.();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const listaVersoes = versoes.data?.versoes ?? [];
 
   const acionar = () => {
     if (existente) {
@@ -130,15 +165,83 @@ export function EditorPeca({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="rotulo">Minuta gerada — revise antes de exportar</p>
-        <Button onClick={acionar} disabled={exportar.isPending || !conteudo.trim()} size="sm">
-          {exportar.isPending ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <FileUp className="size-4" />
+        <div className="flex flex-wrap items-center gap-2">
+          {documentIdAtual && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setHistoricoAberto(true);
+                void versoes.refetch();
+              }}
+            >
+              <History className="size-4" />
+              Histórico de versões
+              {listaVersoes.length > 0 ? ` (${listaVersoes.length})` : ""}
+            </Button>
           )}
-          {existente ? "Atualizar no Google Docs" : "Exportar para Google Docs"}
-        </Button>
+          <Button onClick={acionar} disabled={exportar.isPending || !conteudo.trim()} size="sm">
+            {exportar.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <FileUp className="size-4" />
+            )}
+            {existente ? "Atualizar no Google Docs" : "Exportar para Google Docs"}
+          </Button>
+        </div>
       </div>
+
+      <Dialog open={historicoAberto} onOpenChange={setHistoricoAberto}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Histórico de versões desta peça</DialogTitle>
+            <DialogDescription>
+              Cada exportação/atualização guarda o texto anterior. Restaurar reescreve o documento
+              individual e repagina os autos — o texto atual vira uma nova entrada do histórico.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto">
+            {versoes.isFetching && listaVersoes.length === 0 && (
+              <p className="text-sm text-muted-foreground">Carregando histórico...</p>
+            )}
+            {!versoes.isFetching && listaVersoes.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Ainda não há versões anteriores — o histórico começa na primeira atualização desta
+                peça.
+              </p>
+            )}
+            {listaVersoes.map((v, i) => (
+              <div key={v.id} className="rounded-md border border-border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium">
+                    Versão {listaVersoes.length - i} —{" "}
+                    {new Date(v.criadoEm).toLocaleString("pt-BR")}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => restaurar.mutate(v.id)}
+                    disabled={restaurar.isPending}
+                  >
+                    {restaurar.isPending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="size-4" />
+                    )}
+                    Restaurar
+                  </Button>
+                </div>
+                <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+                  {v.texto.slice(0, 400)}
+                  {v.texto.length > 400 ? "..." : ""}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
 
       {ultimaInsercao && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">

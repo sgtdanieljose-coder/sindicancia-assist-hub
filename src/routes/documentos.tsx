@@ -1,12 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, FolderOpen, Loader2, Paperclip, Plus, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderOpen, Loader2, Paperclip, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -23,12 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
-import { gerarTextoJuntada } from "@/lib/pecas";
-import {
-  adicionarItemJuntada,
-  criarJuntada,
-  salvarTextoJuntada,
-} from "@/lib/sindicancias.functions";
+import { adicionarAnexo, criarJuntada } from "@/lib/sindicancias.functions";
 
 const PASTA_DRIVE = "https://drive.google.com/drive/folders/1zcQGM4T6-PAiEttCAdK6aqNBrUnQ-u6G";
 const PLANILHA =
@@ -68,30 +62,9 @@ function Documentos() {
   const [dialogo, setDialogo] = useState(false);
   const [juntadaId, setJuntadaId] = useState<string>("");
   const [novaJuntada, setNovaJuntada] = useState("");
-  const [descricao, setDescricao] = useState("");
   const [arquivo, setArquivo] = useState<File | null>(null);
-  const [textoJuntada, setTextoJuntada] = useState("");
 
   const juntadas = selecionada?.juntadas ?? [];
-  const juntadaAtual = juntadas.find((j) => j.id === juntadaId);
-
-  // Só recarrega a sugestão de texto quando a juntada selecionada muda — nunca sozinho
-  // enquanto o usuário está editando, pra não apagar o que ele digitou por engano.
-  useEffect(() => {
-    if (juntadaAtual && selecionada) {
-      setTextoJuntada(gerarTextoJuntada(selecionada, juntadaAtual));
-    } else {
-      setTextoJuntada("");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [juntadaId]);
-
-  const recarregarSugestao = () => {
-    if (juntadaAtual && selecionada) {
-      setTextoJuntada(gerarTextoJuntada(selecionada, juntadaAtual));
-      toast.info("Sugestão recarregada com os itens atuais");
-    }
-  };
 
   const criar = useMutation({
     mutationFn: () =>
@@ -113,40 +86,22 @@ function Documentos() {
 
   const enviar = useMutation({
     mutationFn: async () => {
-      if (!descricao.trim()) throw new Error("Descreva o item juntado.");
+      if (!arquivo) throw new Error("Selecione um arquivo.");
       if (!juntadaId) throw new Error("Selecione ou crie uma juntada.");
-      const arquivoPayload = arquivo
-        ? {
-            nome: arquivo.name,
-            mimeType: arquivo.type || "application/octet-stream",
-            base64: await lerArquivo(arquivo),
-          }
-        : undefined;
-      return adicionarItemJuntada({
+      const base64 = await lerArquivo(arquivo);
+      return adicionarAnexo({
         data: {
           sindicanciaId: selecionada!.id,
           juntadaId,
-          descricao: descricao.trim(),
-          arquivo: arquivoPayload,
+          nome: arquivo.name,
+          mimeType: arquivo.type || "application/octet-stream",
+          base64,
         },
       });
     },
     onSuccess: () => {
-      toast.success('Item adicionado — use "Recarregar sugestão" pra trazê-lo pro texto abaixo');
-      setDescricao("");
+      toast.success("Anexo enviado e vinculado à juntada");
       setArquivo(null);
-      recarregar();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const salvar = useMutation({
-    mutationFn: () =>
-      salvarTextoJuntada({
-        data: { sindicanciaId: selecionada!.id, juntadaId, texto: textoJuntada },
-      }),
-    onSuccess: () => {
-      toast.success("Termo da juntada salvo");
       setDialogo(false);
       recarregar();
     },
@@ -256,23 +211,19 @@ function Documentos() {
                 </p>
                 <ul className="space-y-0.5 pl-3">
                   {j.anexos.map((a) => (
-                    <li key={a.id} className="truncate text-sm text-muted-foreground">
-                      {a.url ? (
-                        <a
-                          href={a.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:text-primary"
-                        >
-                          {a.descricao}
-                        </a>
-                      ) : (
-                        a.descricao
-                      )}
+                    <li key={a.fileId} className="truncate text-sm text-muted-foreground">
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-primary"
+                      >
+                        {a.descricao || a.nomeArquivo}
+                      </a>
                     </li>
                   ))}
                   {j.anexos.length === 0 && (
-                    <li className="text-xs text-muted-foreground">sem itens</li>
+                    <li className="text-xs text-muted-foreground">sem anexos</li>
                   )}
                 </ul>
               </div>
@@ -296,12 +247,12 @@ function Documentos() {
       </div>
 
       <Dialog open={dialogo} onOpenChange={setDialogo}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Juntada — itens e termo</DialogTitle>
+            <DialogTitle>Adicionar anexo aos Autos</DialogTitle>
             <DialogDescription>
-              Adicione itens digitados (com arquivo opcional) e revise o texto do termo antes de
-              salvar — nada é gravado nos autos até você clicar em "Salvar termo".
+              O arquivo é enviado à pasta “Anexos” do NUP {selecionada?.nup || "—"} e fica vinculado
+              à juntada escolhida, preservando a ordem dos autos.
             </DialogDescription>
           </DialogHeader>
 
@@ -345,68 +296,26 @@ function Documentos() {
               </div>
             </div>
 
-            <div className="space-y-2 rounded-md border border-border p-3">
-              <Label>Adicionar item à juntada selecionada</Label>
-              <Textarea
-                value={descricao}
-                onChange={(e) => setDescricao(e.target.value)}
-                placeholder="Ex.: Ofício nº 123, de 15 de julho de 2026: solicitação de documentos ao Sr. Fulano;"
-                className="min-h-16"
-              />
-              <p className="text-xs text-muted-foreground">
-                Texto livre — pode ter vírgula, dois-pontos etc.
-              </p>
+            <div className="space-y-1.5">
+              <Label>Arquivo (foto ou PDF)</Label>
               <Input
                 type="file"
                 accept="image/*,application/pdf"
                 onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
               />
               <p className="text-xs text-muted-foreground">
-                Arquivo opcional — se anexado, ganha folha própria nos autos (foto incorporada, ou
-                link para PDF).
+                Fotos ficam incorporadas no texto da juntada; PDFs viram um link clicável.
               </p>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => enviar.mutate()}
-                disabled={enviar.isPending || !juntadaId}
-              >
-                {enviar.isPending && <Loader2 className="size-4 animate-spin" />}
-                Adicionar item
-              </Button>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label>Texto do termo (revise e edite antes de salvar)</Label>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={recarregarSugestao}
-                  disabled={!juntadaId}
-                >
-                  <RefreshCw className="size-3.5" /> Recarregar sugestão
-                </Button>
-              </div>
-              <Textarea
-                value={textoJuntada}
-                onChange={(e) => setTextoJuntada(e.target.value)}
-                disabled={!juntadaId}
-                className="min-h-64 font-mono text-sm"
-              />
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogo(false)}>
-              Fechar
+              Cancelar
             </Button>
-            <Button
-              onClick={() => salvar.mutate()}
-              disabled={salvar.isPending || !juntadaId || !textoJuntada.trim()}
-            >
-              {salvar.isPending && <Loader2 className="size-4 animate-spin" />}
-              Salvar termo
+            <Button onClick={() => enviar.mutate()} disabled={enviar.isPending}>
+              {enviar.isPending && <Loader2 className="size-4 animate-spin" />}
+              Enviar anexo
             </Button>
           </DialogFooter>
         </DialogContent>
