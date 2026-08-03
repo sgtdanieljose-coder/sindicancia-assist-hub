@@ -110,6 +110,7 @@ export const HEADERS = [
   "autos_url",
   "juntadas",
   "prazo_prorrogado_dias",
+  "local_trabalhos",
 ];
 
 /** Converte um índice de coluna 1-based em letra de coluna do Sheets (1 -> A, 17 -> Q, 27 -> AA...). */
@@ -407,6 +408,8 @@ async function listarParagrafos(documentId: string): Promise<Paragrafo[]> {
 /** Título literal (linha exata no corpo do texto) de cada peça que já segue a convenção acima. */
 const TITULOS_PECA: Partial<Record<string, string>> = {
   autos: "AUTOS DE SINDICÂNCIA",
+  "despacho-inicial": "DESPACHO",
+  "despacho-diversos": "DESPACHO",
   abertura: "TERMO DE ABERTURA",
 };
 
@@ -686,7 +689,7 @@ async function garantirCarimboFixo(documentId: string) {
     }>("google_docs", `/v1/documents/${documentId}`, { query: { fields: "headers" } });
 
     const headersMap = doc.headers ?? {};
-    let headerId = Object.keys(headersMap)[0];
+    let headerId: string | undefined = Object.keys(headersMap)[0];
 
     if (headerId) {
       const jaTemImagem = (headersMap[headerId].content ?? []).some((el) =>
@@ -694,12 +697,13 @@ async function garantirCarimboFixo(documentId: string) {
       );
       if (jaTemImagem) return;
     } else {
-      const criado = await gw<{ headerId: string }>(
+      const criado = await gw<{ replies?: { createHeader?: { headerId?: string } }[] }>(
         "google_docs",
         `/v1/documents/${documentId}:batchUpdate`,
         { method: "POST", body: { requests: [{ createHeader: { type: "DEFAULT" } }] } },
       );
-      headerId = criado.headerId;
+      headerId = criado.replies?.[0]?.createHeader?.headerId;
+      if (!headerId) throw new Error("A API não devolveu o ID do cabeçalho criado.");
     }
 
     await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
