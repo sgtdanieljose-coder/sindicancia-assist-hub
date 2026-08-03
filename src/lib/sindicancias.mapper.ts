@@ -35,6 +35,7 @@ export function rowToSindicancia(row: string[]): Sindicancia {
     autosUrl: row[21] || undefined,
     juntadas: safeParse<Juntada[]>(row[22], []),
     prazoProrrogadoDias: row[23] ? Number(row[23]) || 0 : 0,
+    localTrabalhos: row[24] ?? "",
   };
 }
 
@@ -64,5 +65,6 @@ export function sindicanciaToRow(s: Sindicancia): string[] {
     s.autosUrl ?? "",
     JSON.stringify(s.juntadas ?? []),
     String(s.prazoProrrogadoDias ?? 0),
+    s.localTrabalhos ?? "",
   ];
 }
