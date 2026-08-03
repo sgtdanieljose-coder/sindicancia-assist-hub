@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, FileUp, Loader2, Undo2 } from "lucide-react";
+import { ExternalLink, FileUp, History, Loader2, RotateCcw, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { desfazerInsercao, exportarParaDocs } from "@/lib/sindicancias.functions";
+import {
+  desfazerInsercao,
+  exportarParaDocs,
+  listarVersoes,
+  restaurarVersao,
+} from "@/lib/sindicancias.functions";
 
 type Props = {
   titulo: string;
@@ -33,6 +38,7 @@ type Props = {
   onChange: (texto: string) => void;
   onExportado?: () => void;
 };
+
 
 export function EditorPeca({
   titulo,
