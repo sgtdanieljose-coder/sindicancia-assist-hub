@@ -53,6 +53,8 @@ export type Sindicancia = {
   anexosUrl?: string;
   /** Cidade/localidade em que os atos são lavrados. */
   local: string;
+  /** Local específico dos trabalhos (onde serão feitas as oitivas) — ex.: sala/prédio, distinto da cidade. */
+  localTrabalhos: string;
   /** Subordinação da OM (ex.: "12ª Brigada de Infantaria Leve"). */
   subordinacao: string;
   /** OM instauradora (comando que expediu a portaria). */
@@ -78,6 +80,7 @@ export const ETAPAS = [
   "Recebimento da Portaria de instauração",
   "Autuação (Capa dos Autos de Sindicância)",
   "Termo de Abertura dos Trabalhos",
+  "Despacho inicial",
   "Notificação prévia do sindicado",
   "Juntada de documentos",
   "Inquirição de testemunhas",
@@ -109,6 +112,18 @@ export const PECAS = [
     nome: "Termo de Abertura dos Trabalhos",
     unica: true,
     etapa: "Termo de Abertura dos Trabalhos",
+  },
+  {
+    id: "despacho-inicial",
+    nome: "Despacho Inicial",
+    unica: true,
+    etapa: "Despacho inicial",
+  },
+  {
+    id: "despacho-diversos",
+    nome: "Despachos Diversos",
+    unica: false,
+    etapa: undefined,
   },
   {
     id: "notificacao",
@@ -311,6 +326,8 @@ function assinatura(s: Sindicancia) {
 
 export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
   const local = c.local || s.local || "____________";
+  // Oitivas (inquirição/depoimento) usam o local específico dos trabalhos quando preenchido.
+  const localOitiva = c.local || s.localTrabalhos || s.local || "____________";
   const head = cabecalho(s);
 
   if (peca === "autos") {
@@ -350,6 +367,46 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
         ].join("\n");
       }
 
+      case "despacho-inicial": {
+        const sindicadoTxt = s.sindicado || "“sindicado adicionado na base de dados”";
+        const portariaTxt = s.portariaNumero || "“Portaria adicionada na base”";
+        const dataPortariaTxt = s.portariaData ? dataExtenso(s.portariaData) : "“data da portaria”";
+        const autoridadeTxt = s.autoridade || "“Autoridade Instauradora da base de dados”";
+        const omTxt = s.om || "“OM adicionada na base de dados”";
+        const dataOitivaTxt = c.data ? dataExtenso(c.data) : "“data designada”";
+        const horaTxt = c.hora || "__:__";
+        const localOitivaTxt = s.localTrabalhos || "“local dos trabalhos”";
+        const fechamentoData = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "DESPACHO",
+          "",
+          `Oficiar ao(à) ${sindicadoTxt}, sindicado, notificando previamente sobre a instauração da sindicância referente à Portaria nº ${portariaTxt}, de ${dataPortariaTxt}, do Sr ${autoridadeTxt}, Comandante do ${omTxt}.`,
+          "",
+          `Oficiar ao Sr. Comandante da “subunidade do sindicado”, com a finalidade de autorizar o comparecimento do ${sindicadoTxt}, com a finalidade de ser inquirido como sindicado.`,
+          "",
+          `Oficiar ao Chefe da “seção competente”, com a finalidade de solicitar “documento necessário”.`,
+          "",
+          `Designo o dia ${dataOitivaTxt}, às ${horaTxt} horas, a fim de ser ouvido o sindicado ${sindicadoTxt}, em ${localOitivaTxt}.`,
+          "",
+          "",
+          `Quartel em ${s.local || "____________"}, ${fechamentoData}.`,
+        ].join("\n");
+      }
+
+      case "despacho-diversos": {
+        const fechamentoData = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "DESPACHO",
+          "",
+          c.justificativa || "“conteúdo do despacho”",
+          "",
+          "",
+          `Quartel em ${s.local || "____________"}, ${fechamentoData}.`,
+        ].join("\n");
+      }
+
       case "notificacao":
         return [
           subcabecalhoProcesso(s),
@@ -367,7 +424,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           subcabecalhoProcesso(s),
           "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
           "",
-          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, presente o Sindicante, compareceu ${c.destinatario || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de testemunha, advertido(a) das penas cominadas ao falso testemunho, prometeu dizer a verdade do que soubesse e lhe fosse perguntado.`,
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${localOitiva}, presente o Sindicante, compareceu ${c.destinatario || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de testemunha, advertido(a) das penas cominadas ao falso testemunho, prometeu dizer a verdade do que soubesse e lhe fosse perguntado.`,
           "",
           "PERGUNTAS FORMULADAS:",
           c.perguntas || "1) ...",
@@ -387,7 +444,7 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           subcabecalhoProcesso(s),
           "TERMO DE DECLARAÇÕES DO SINDICADO",
           "",
-          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, presente o Sindicante, compareceu ${s.sindicado || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de sindicado, cientificado do direito ao silêncio, ao contraditório e à ampla defesa, respondeu:`,
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${localOitiva}, presente o Sindicante, compareceu ${s.sindicado || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de sindicado, cientificado do direito ao silêncio, ao contraditório e à ampla defesa, respondeu:`,
           "",
           "PERGUNTAS FORMULADAS:",
           c.perguntas || "1) ...",
