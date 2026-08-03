@@ -63,6 +63,8 @@ const vazia: Sindicancia = {
   documentos: [],
   atualizadoEm: "",
   local: "",
+  localTrabalhos: "",
+
   subordinacao: "",
   omInstauradora: "",
   juntadas: [],
