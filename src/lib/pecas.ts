@@ -31,7 +31,6 @@ export type VersaoPeca = {
 };
 
 export type Sindicancia = {
-
   id: string;
   nup: string;
   portariaNumero: string;
@@ -557,6 +556,58 @@ export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
   ].join("\n");
 
   return `${cabecalho(s)}${corpo}\n${assinatura(s)}`;
+}
+
+/**
+ * Um registro da tabela "Dados_Sindicado" — uma sindicância pode ter vários (um por
+ * sindicado). Vínculo com a sindicância é pelo id (não pelo NUP). `linha` é a posição na
+ * planilha, preenchida pelo servidor; ausente/undefined significa "ainda não salvo".
+ */
+export type DadoSindicado = {
+  linha?: number;
+  sindicanciaId: string;
+  /** Select inicial — dele depende quais campos abaixo fazem sentido mostrar. */
+  civil: "Militar" | "Civil" | "";
+  /** Identidade (RG civil ou identidade militar). */
+  idt: string;
+  cpf: string;
+  nascimento: string;
+  naturalidade: string;
+  estadoCivil: string;
+  filiacao: string;
+  mae: string;
+  enderecoCompleto: string;
+  cep: string;
+  /** Só faz sentido se militar. */
+  companhia: string;
+  /** Só faz sentido se civil. */
+  vocativo: string;
+};
+
+/**
+ * Monta o parágrafo de qualificação do sindicado a partir de um DadoSindicado — civil e
+ * militar têm textos ligeiramente diferentes (vocativo só entra no civil; unidade/companhia
+ * só entra no militar). Pronta para ser usada no Termo de Depoimento, Ofícios, Diex e no
+ * Relatório Final.
+ */
+export function gerarQualificacaoSindicado(d: DadoSindicado): string {
+  const nascimentoTxt = d.nascimento ? dataExtenso(d.nascimento) : "“data de nascimento”";
+  const idtTxt = d.idt || "“identidade”";
+  const cpfTxt = d.cpf || "“CPF”";
+  const naturalidadeTxt = d.naturalidade || "“naturalidade”";
+  const estadoCivilTxt = d.estadoCivil || "“estado civil”";
+  const filiacaoTxt = d.filiacao || "“filiação”";
+  const maeTxt = d.mae || "“mãe”";
+  const enderecoTxt = d.enderecoCompleto || "“endereço”";
+  const cepTxt = d.cep || "“CEP”";
+
+  if (d.civil === "Militar") {
+    const companhiaTxt = d.companhia || "“companhia/unidade”";
+    return `portador(a) da identidade militar nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, servindo na ${companhiaTxt}, residente em ${enderecoTxt}, CEP ${cepTxt}`;
+  }
+
+  const vocativoTxt = d.vocativo || "Senhor(a)";
+  return `${vocativoTxt}, portador(a) da carteira de identidade nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, residente em ${enderecoTxt}, CEP ${cepTxt}`;
 }
 
 export type Relatorio = {
