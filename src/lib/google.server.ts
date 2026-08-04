@@ -202,6 +202,114 @@ export async function updateRow(rowIndex: number, row: string[]) {
   });
 }
 
+// ====================================================================================
+// Aba "Dados_Sindicado" — um registro por sindicado (uma sindicância pode ter vários),
+// vinculado pelo id da sindicância (coluna A), não pelo NUP.
+// ====================================================================================
+
+export const SINDICADOS_TAB = "Dados_Sindicado";
+
+export const SINDICADOS_HEADERS = [
+  "id",
+  "civil",
+  "idt",
+  "cpf",
+  "nascimento",
+  "naturalidade",
+  "estado_civil",
+  "filiacao",
+  "mae",
+  "endereco_completo",
+  "cep",
+  "companhia",
+  "vocativo",
+];
+
+const ULTIMA_COLUNA_SINDICADOS = columnLetter(SINDICADOS_HEADERS.length);
+
+async function ensureSindicadosTab() {
+  const meta = await gw<{ sheets: { properties: { title: string } }[] }>(
+    "google_sheets",
+    `/v4/spreadsheets/${SPREADSHEET_ID}`,
+    { query: { fields: "sheets.properties.title" } },
+  );
+  const exists = meta.sheets?.some((s) => s.properties.title === SINDICADOS_TAB);
+
+  if (!exists) {
+    await gw("google_sheets", `/v4/spreadsheets/${SPREADSHEET_ID}:batchUpdate`, {
+      method: "POST",
+      body: { requests: [{ addSheet: { properties: { title: SINDICADOS_TAB } } }] },
+    });
+    await gw(
+      "google_sheets",
+      `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SINDICADOS_TAB}!A1:${ULTIMA_COLUNA_SINDICADOS}1`,
+      {
+        method: "PUT",
+        query: { valueInputOption: "RAW" },
+        body: { values: [SINDICADOS_HEADERS] },
+      },
+    );
+    return;
+  }
+
+  // Migração: se a aba já existia com menos colunas, completa o cabeçalho sem tocar nos dados.
+  const cabecalhoAtual = await gw<{ values?: string[][] }>(
+    "google_sheets",
+    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SINDICADOS_TAB}!A1:${ULTIMA_COLUNA_SINDICADOS}1`,
+  );
+  if ((cabecalhoAtual.values?.[0]?.length ?? 0) < SINDICADOS_HEADERS.length) {
+    await gw(
+      "google_sheets",
+      `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SINDICADOS_TAB}!A1:${ULTIMA_COLUNA_SINDICADOS}1`,
+      {
+        method: "PUT",
+        query: { valueInputOption: "RAW" },
+        body: { values: [SINDICADOS_HEADERS] },
+      },
+    );
+  }
+}
+
+/** Lê todas as linhas de Dados_Sindicado (não filtra vazias — quem chama sabe a posição real). */
+export async function readSindicadosRows(): Promise<string[][]> {
+  await ensureSindicadosTab();
+  const data = await gw<{ values?: string[][] }>(
+    "google_sheets",
+    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SINDICADOS_TAB}!A2:${ULTIMA_COLUNA_SINDICADOS}1000`,
+  );
+  return data.values ?? [];
+}
+
+export async function appendSindicadoRow(row: string[]) {
+  await ensureSindicadosTab();
+  await gw(
+    "google_sheets",
+    `/v4/spreadsheets/${SPREADSHEET_ID}/values/${SINDICADOS_TAB}!A:${ULTIMA_COLUNA_SINDICADOS}:append`,
+    {
+      method: "POST",
+      query: { valueInputOption: "USER_ENTERED", insertDataOption: "INSERT_ROWS" },
+      body: { values: [row] },
+    },
+  );
+}
+
+export async function updateSindicadoRow(rowIndex: number, row: string[]) {
+  const a1 = `${SINDICADOS_TAB}!A${rowIndex}:${ULTIMA_COLUNA_SINDICADOS}${rowIndex}`;
+  await gw("google_sheets", `/v4/spreadsheets/${SPREADSHEET_ID}/values/${a1}`, {
+    method: "PUT",
+    query: { valueInputOption: "USER_ENTERED" },
+    body: { values: [row] },
+  });
+}
+
+/** "Remove" um sindicado limpando a linha (mantém a posição das demais — evita reindexação). */
+export async function limparSindicadoRow(rowIndex: number) {
+  const a1 = `${SINDICADOS_TAB}!A${rowIndex}:${ULTIMA_COLUNA_SINDICADOS}${rowIndex}`;
+  await gw("google_sheets", `/v4/spreadsheets/${SPREADSHEET_ID}/values/${a1}:clear`, {
+    method: "POST",
+  });
+}
+
 /**
  * Verifica se um arquivo/pasta do Drive ainda existe e não está na lixeira. O Drive costuma
  * mover para a lixeira em vez de apagar de vez, e a API do Docs continua aceitando leitura e
