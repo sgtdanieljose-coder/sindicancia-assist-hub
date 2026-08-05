@@ -76,6 +76,8 @@ export type Sindicancia = {
   juntadas: Juntada[];
   /** Dias adicionais concedidos por prorrogação (somados aos 30 dias corridos regulamentares). */
   prazoProrrogadoDias?: number;
+  /** Marcadores livres para categorizar a sindicância e facilitar buscas futuras. */
+  tags: string[];
 };
 
 export const PRAZO_BASE_DIAS = 30;
@@ -109,6 +111,32 @@ export const STATUS = [
   "Prorrogada",
   "Concluída",
   "Arquivada",
+] as const;
+
+/** Lista fixa de tags para categorizar sindicâncias e facilitar buscas futuras. */
+export const TAGS_DISPONIVEIS = [
+  "Acidente de SV",
+  "Dano ao Erário",
+  "Reinclusão de Dependente",
+  "Desídia de Adido",
+  "Anulação de Incorporação",
+  "Irregularidade na Incorporação",
+  "Recuperação de Adido",
+  "Aux Transporte",
+  "Acumulo de Benefício",
+  "Dano Material",
+  "Dano Pessoal",
+  "Nexo Causal",
+  "Incapacidade Física Temporária",
+  "Desaparecimento de material",
+  "Perda de armamento",
+  "Extravio de munição",
+  "Acidentes durante instrução",
+  "Acidentes em serviço",
+  "Documentos sigilosos",
+  "Reconhecimento de direitos",
+  "Auxílio-fardamento",
+  "Outros",
 ] as const;
 
 export const PECAS = [
@@ -522,122 +550,4 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           "",
           `2. Justificativa: ${c.justificativa || "necessidade de realização de diligências imprescindíveis à elucidação dos fatos, ainda pendentes de conclusão."}`,
           "",
-          "3. O pedido encontra amparo na Portaria C Ex nr 2.394/2024 (EB10-IG-09.001).",
-          "",
-          "4. Nestes termos, peço deferimento.",
-        ].join("\n");
-
-      default:
-        return "";
-    }
-  })();
-
-  return `${head}${corpo}\n${assinatura(s)}`;
-}
-
-/**
- * Gera o texto de uma juntada específica (com numeração própria, ex.: "JUNTADA Nº 2"),
- * listando os anexos já enviados. Segue a mesma convenção de formatação-base das demais
- * peças; as fotos/PDFs em si são incorporados depois, sobre o Google Doc já criado — ver
- * inserirAnexosNaJuntada em google.server.ts.
- */
-export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
-  const titulo = `JUNTADA Nº ${j.numero}`;
-  const listaAnexos = j.anexos.length
-    ? j.anexos.map((a, i) => `${i + 1}. ${a.descricao}`).join("\n\n")
-    : "(nenhum item juntado até o momento)";
-
-  const corpo = [
-    ...ESPACO_ANTES_TITULO,
-    titulo,
-    "",
-    `Aos ${dataPorExtenso(j.data)}, nesta cidade de ${s.local || "____________"}, no quartel do ${s.om || "OM"}, faço a juntada aos autos da presente sindicância dos documentos a seguir especificados, do que, para constar, lavrei o presente termo.`,
-    "",
-    listaAnexos,
-  ].join("\n");
-
-  return `${cabecalho(s)}${corpo}\n${assinatura(s)}`;
-}
-
-/**
- * Um registro da tabela "Dados_Sindicado" — uma sindicância pode ter vários (um por
- * sindicado). Vínculo com a sindicância é pelo id (não pelo NUP). `linha` é a posição na
- * planilha, preenchida pelo servidor; ausente/undefined significa "ainda não salvo".
- */
-export type DadoSindicado = {
-  linha?: number;
-  sindicanciaId: string;
-  /** Select inicial — dele depende quais campos abaixo fazem sentido mostrar. */
-  civil: "Militar" | "Civil" | "";
-  /** Identidade (RG civil ou identidade militar). */
-  idt: string;
-  cpf: string;
-  nascimento: string;
-  naturalidade: string;
-  estadoCivil: string;
-  filiacao: string;
-  mae: string;
-  enderecoCompleto: string;
-  cep: string;
-  /** Só faz sentido se militar. */
-  companhia: string;
-  /** Só faz sentido se civil. */
-  vocativo: string;
-};
-
-/**
- * Monta o parágrafo de qualificação do sindicado a partir de um DadoSindicado — civil e
- * militar têm textos ligeiramente diferentes (vocativo só entra no civil; unidade/companhia
- * só entra no militar). Pronta para ser usada no Termo de Depoimento, Ofícios, Diex e no
- * Relatório Final.
- */
-export function gerarQualificacaoSindicado(d: DadoSindicado): string {
-  const nascimentoTxt = d.nascimento ? dataExtenso(d.nascimento) : "“data de nascimento”";
-  const idtTxt = d.idt || "“identidade”";
-  const cpfTxt = d.cpf || "“CPF”";
-  const naturalidadeTxt = d.naturalidade || "“naturalidade”";
-  const estadoCivilTxt = d.estadoCivil || "“estado civil”";
-  const filiacaoTxt = d.filiacao || "“filiação”";
-  const maeTxt = d.mae || "“mãe”";
-  const enderecoTxt = d.enderecoCompleto || "“endereço”";
-  const cepTxt = d.cep || "“CEP”";
-
-  if (d.civil === "Militar") {
-    const companhiaTxt = d.companhia || "“companhia/unidade”";
-    return `portador(a) da identidade militar nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, servindo na ${companhiaTxt}, residente em ${enderecoTxt}, CEP ${cepTxt}`;
-  }
-
-  const vocativoTxt = d.vocativo || "Senhor(a)";
-  return `${vocativoTxt}, portador(a) da carteira de identidade nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, residente em ${enderecoTxt}, CEP ${cepTxt}`;
-}
-
-export type Relatorio = {
-  introducao: string;
-  diligencias: string;
-  analise: string;
-  conclusao: string;
-};
-
-export function gerarRelatorio(s: Sindicancia, r: Relatorio, local: string, data: string) {
-  return [
-    cabecalho(s),
-    subcabecalhoProcesso(s),
-    "RELATÓRIO DO SINDICANTE",
-    "",
-    "1. INTRODUÇÃO",
-    r.introducao ||
-      `A presente Sindicância foi instaurada pela Portaria nr ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, da lavra do(a) ${s.autoridade || "Autoridade Instauradora"}, a fim de apurar ${s.objeto || "os fatos nela descritos"}.`,
-    "",
-    "2. DILIGÊNCIAS REALIZADAS",
-    r.diligencias || "a) ...",
-    "",
-    "3. ANÁLISE DOS FATOS",
-    r.analise || "...",
-    "",
-    "4. CONCLUSÃO",
-    r.conclusao || "...",
-    "",
-    `${local || s.local || "________________"}, ${dataExtenso(data)}.`,
-    assinatura(s),
-  ].join("\n");
-}
+      
