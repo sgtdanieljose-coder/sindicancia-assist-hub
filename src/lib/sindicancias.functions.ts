@@ -22,7 +22,7 @@ function rowToDadoSindicado(row: string[], linha: number): DadoSindicado {
     filiacao: row[7] ?? "",
     mae: row[8] ?? "",
     enderecoCompleto: row[9] ?? "",
-    cep: row[10] ?? "",
+    // row[10] era "cep" — não é mais coletado (o CEP agora vai dentro de enderecoCompleto).
     companhia: row[11] ?? "",
     vocativo: row[12] ?? "",
   };
@@ -40,7 +40,7 @@ function dadoSindicadoToRow(d: DadoSindicado): string[] {
     d.filiacao,
     d.mae,
     d.enderecoCompleto,
-    d.cep,
+    "", // coluna "cep" mantida em branco só para não deslocar companhia/vocativo
     d.companhia,
     d.vocativo,
   ];
