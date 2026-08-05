@@ -1,5 +1,12 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, FileSignature, ScrollText, FolderOpen, Shield } from "lucide-react";
+import {
+  LayoutDashboard,
+  BarChart3,
+  FileSignature,
+  ScrollText,
+  FolderOpen,
+  Shield,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -15,6 +22,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const itens = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Gráficos", url: "/graficos", icon: BarChart3 },
   { title: "Gerador de Peças", url: "/pecas", icon: FileSignature },
   { title: "Relatório do Sindicante", url: "/relatorio", icon: ScrollText },
   { title: "Autos e Documentos", url: "/documentos", icon: FolderOpen },
