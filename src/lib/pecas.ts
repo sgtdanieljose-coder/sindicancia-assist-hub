@@ -501,6 +501,8 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
       case "oficio":
         return [
           subcabecalhoProcesso(s),
+          "OFÍCIO",
+          "",
           `Ofício nr ${c.numeroOficio || "____"} - Sind ${s.nup || ""}`,
           "",
           `Ao Senhor ${c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade"}`,
@@ -605,35 +607,31 @@ export type DadoSindicado = {
   estadoCivil: string;
   filiacao: string;
   mae: string;
+  /** Inclui o CEP digitado junto ao restante do endereço. */
   enderecoCompleto: string;
-  /** Mantido só por compatibilidade — o CEP passou a integrar enderecoCompleto. */
-  cep?: string;
   /** Só faz sentido se militar. */
   companhia: string;
   /** Só faz sentido se civil. */
   vocativo: string;
 };
 
-/** Opções de estado civil oferecidas no cadastro do sindicado. */
-export const ESTADO_CIVIL_OPCOES = [
-  "Solteiro(a)",
-  "Casado(a)",
-  "Divorciado(a)",
-  "Separado(a)",
-  "Viúvo(a)",
-  "União estável",
-] as const;
+/** Opções fixas de estado civil. */
+export const ESTADO_CIVIL_OPCOES = ["Solteiro", "Casado", "Divorciado", "Viúvo"] as const;
 
-/** Formata progressivamente um CPF digitado (000.000.000-00). */
+/** Formata dígitos de CPF no padrão oficial 000.000.000-00 conforme o usuário digita. */
 export function formatarCPF(valor: string): string {
-  const d = valor.replace(/\D/g, "").slice(0, 11);
-  if (d.length <= 3) return d;
-  if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
-  if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
-  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  const digitos = valor.replace(/\D/g, "").slice(0, 11);
+  if (digitos.length > 9) {
+    return `${digitos.slice(0, 3)}.${digitos.slice(3, 6)}.${digitos.slice(6, 9)}-${digitos.slice(9)}`;
+  }
+  if (digitos.length > 6) {
+    return `${digitos.slice(0, 3)}.${digitos.slice(3, 6)}.${digitos.slice(6)}`;
+  }
+  if (digitos.length > 3) {
+    return `${digitos.slice(0, 3)}.${digitos.slice(3)}`;
+  }
+  return digitos;
 }
-
-
 
 /**
  * Monta o parágrafo de qualificação do sindicado a partir de um DadoSindicado — civil e
@@ -650,15 +648,14 @@ export function gerarQualificacaoSindicado(d: DadoSindicado): string {
   const filiacaoTxt = d.filiacao || "“filiação”";
   const maeTxt = d.mae || "“mãe”";
   const enderecoTxt = d.enderecoCompleto || "“endereço”";
-  const cepTxt = d.cep || "“CEP”";
 
   if (d.civil === "Militar") {
     const companhiaTxt = d.companhia || "“companhia/unidade”";
-    return `portador(a) da identidade militar nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, servindo na ${companhiaTxt}, residente em ${enderecoTxt}, CEP ${cepTxt}`;
+    return `portador(a) da identidade militar nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, servindo na ${companhiaTxt}, residente em ${enderecoTxt}`;
   }
 
   const vocativoTxt = d.vocativo || "Senhor(a)";
-  return `${vocativoTxt}, portador(a) da carteira de identidade nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, residente em ${enderecoTxt}, CEP ${cepTxt}`;
+  return `${vocativoTxt}, portador(a) da carteira de identidade nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, residente em ${enderecoTxt}`;
 }
 
 export type Relatorio = {
