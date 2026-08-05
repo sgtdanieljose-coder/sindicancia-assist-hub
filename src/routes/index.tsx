@@ -529,3 +529,201 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
     queryKey: ["sindicados", sindicanciaId],
     queryFn: () => listarSindicados({ data: { sindicanciaId: sindicanciaId! } }),
     enabled: !!sindicanciaId,
+  });
+
+  const salvar = useMutation({
+    mutationFn: (d: DadoSindicado) => salvarSindicado({ data: d }),
+    onSuccess: () => {
+      toast.success("Sindicado salvo");
+      setEditando(null);
+      refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const remover = useMutation({
+    mutationFn: (linha: number) => removerSindicado({ data: { linha } }),
+    onSuccess: () => {
+      toast.success("Sindicado removido");
+      refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!sindicanciaId) {
+    return (
+      <div className="painel p-4 text-sm text-muted-foreground sm:p-5">
+        Salve a sindicância em "Dados Gerais" antes de cadastrar sindicados.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="painel space-y-3 p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="rotulo">Sindicados cadastrados</h2>
+          <Button size="sm" onClick={() => setEditando({ ...SINDICADO_VAZIO, sindicanciaId })}>
+            <Plus className="size-4" /> Novo sindicado
+          </Button>
+        </div>
+
+        {isLoading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+        {!isLoading && sindicados.length === 0 && (
+          <p className="text-sm text-muted-foreground">Nenhum sindicado cadastrado ainda.</p>
+        )}
+
+        <div className="space-y-2">
+          {sindicados.map((s) => (
+            <div
+              key={s.linha}
+              className="flex items-center justify-between gap-3 rounded-md border border-border p-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">
+                  {s.civil || "—"} · {s.idt || "sem identidade"}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {s.civil === "Militar" ? s.companhia || "—" : s.vocativo || "—"}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Button size="sm" variant="outline" onClick={() => setEditando(s)}>
+                  Editar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => s.linha && remover.mutate(s.linha)}
+                  disabled={remover.isPending}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editando && (
+        <div className="painel space-y-4 p-4 sm:p-5">
+          <h2 className="rotulo">{editando.linha ? "Editar sindicado" : "Novo sindicado"}</h2>
+
+          <div className="space-y-1.5">
+            <Label>Militar ou Civil</Label>
+            <Select
+              value={editando.civil}
+              onValueChange={(v) =>
+                setEditando({ ...editando, civil: v as DadoSindicado["civil"] })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Militar">Militar</SelectItem>
+                <SelectItem value="Civil">Civil</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Campo
+              label="Identidade (RG ou identidade militar)"
+              value={editando.idt}
+              onChange={(v) => setEditando({ ...editando, idt: v })}
+            />
+            <div className="space-y-1.5">
+              <Label>CPF</Label>
+              <Input
+                value={editando.cpf}
+                onChange={(e) => setEditando({ ...editando, cpf: formatarCPF(e.target.value) })}
+                placeholder="000.000.000-00"
+                inputMode="numeric"
+                maxLength={14}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Data de nascimento</Label>
+              <Input
+                type="date"
+                value={editando.nascimento}
+                onChange={(e) => setEditando({ ...editando, nascimento: e.target.value })}
+              />
+            </div>
+            <Campo
+              label="Naturalidade"
+              value={editando.naturalidade}
+              onChange={(v) => setEditando({ ...editando, naturalidade: v })}
+            />
+            <Campo
+              label="Pai"
+              value={editando.filiacao}
+              onChange={(v) => setEditando({ ...editando, filiacao: v })}
+            />
+            <Campo
+              label="Mãe"
+              value={editando.mae}
+              onChange={(v) => setEditando({ ...editando, mae: v })}
+            />
+            <div className="space-y-1.5">
+              <Label>Estado civil</Label>
+              <Select
+                value={editando.estadoCivil}
+                onValueChange={(v) => setEditando({ ...editando, estadoCivil: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ESTADO_CIVIL_OPCOES.map((opcao) => (
+                    <SelectItem key={opcao} value={opcao}>
+                      {opcao}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {editando.civil !== "Civil" && (
+              <Campo
+                label="Companhia/Unidade"
+                value={editando.companhia}
+                onChange={(v) => setEditando({ ...editando, companhia: v })}
+              />
+            )}
+            {editando.civil !== "Militar" && (
+              <Campo
+                label="Vocativo"
+                value={editando.vocativo}
+                onChange={(v) => setEditando({ ...editando, vocativo: v })}
+              />
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Endereço completo</Label>
+            <Textarea
+              value={editando.enderecoCompleto}
+              onChange={(e) => setEditando({ ...editando, enderecoCompleto: e.target.value })}
+              placeholder="Rua, número, bairro, cidade/UF, CEP"
+            />
+            <p className="text-xs text-muted-foreground">Inclua o CEP junto ao endereço.</p>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditando(null)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => salvar.mutate(editando)}
+              disabled={salvar.isPending || !editando.civil}
+            >
+              {salvar.isPending && <Loader2 className="size-4 animate-spin" />}
+              <Save className="size-4" /> Salvar
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
