@@ -615,8 +615,9 @@ export const restaurarVersao = createServerFn({ method: "POST" })
       await rebuildAutos(autos.documentId, pecas);
     } catch (e) {
       console.warn("Falha ao reconstruir o documento único após restaurar versão:", e);
+      avisoFormatacao = e instanceof Error ? e.message : String(e);
     }
 
     await updateRow(linha, sindicanciaToRow(atual));
-    return { texto: versao.texto, criadoEm: versao.criadoEm };
+    return { texto: versao.texto, criadoEm: versao.criadoEm, avisoFormatacao };
   });
