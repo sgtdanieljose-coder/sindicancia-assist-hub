@@ -573,5 +573,54 @@ export const restaurarVersao = createServerFn({ method: "POST" })
       data,
   )
   .handler(async ({ data }) => {
-    const {
-      updateDoc
+    const { updateDocContent, updateRow, ensureAutosDoc, rebuildAutos, getDocText } = await import(
+      "./google.server"
+    );
+
+    const { atual, linha } = await carregar(data.sindicanciaId);
+    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
+    if (!alvo) throw new Error("Peça não localizada nos autos.");
+
+    const versao = (alvo.versoes ?? []).find((v) => v.id === data.versaoId);
+    if (!versao) throw new Error("Versão não localizada no histórico desta peça.");
+
+    const textoAtual = await getDocText(data.documentId);
+    alvo.versoes = novaVersao(alvo.versoes, textoAtual, versao.texto);
+
+    await updateDocContent(data.documentId, versao.texto);
+
+    let avisoFormatacao: string | undefined;
+
+
+    try {
+      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+      atual.autosDocId = autos.documentId;
+      atual.autosUrl = autos.url;
+      const pecas: {
+        pecaId?: string;
+        titulo: string;
+        tituloInterno?: string;
+        texto: string;
+        anexos?: AnexoJuntada[];
+      }[] = [];
+      for (const d of atual.documentos) {
+        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+          : undefined;
+        pecas.push({
+          pecaId: d.pecaId,
+          titulo: d.titulo,
+          tituloInterno: d.tituloInterno,
+          texto: d.documentId === data.documentId ? versao.texto : await getDocText(d.documentId),
+          anexos: juntadaDoItem?.anexos,
+        });
+      }
+      await rebuildAutos(autos.documentId, pecas);
+    } catch (e) {
+      console.warn("Falha ao reconstruir o documento único após restaurar versão:", e);
+      avisoFormatacao = e instanceof Error ? e.message : String(e);
+    }
+
+    await updateRow(linha, sindicanciaToRow(atual));
+    return { texto: versao.texto, criadoEm: versao.criadoEm, avisoFormatacao };
+  });
