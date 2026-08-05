@@ -19,7 +19,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
-import { DashboardMetricas } from "@/components/DashboardMetricas";
 import {
   listarSindicados,
   removerSindicado,
@@ -143,8 +142,6 @@ function Dashboard() {
           <span className="min-w-0 break-words">{erro}</span>
         </div>
       )}
-
-      <DashboardMetricas itens={itens} />
 
       {itens.length > 0 && (
         <div className="painel space-y-3 p-4 sm:p-5">
@@ -532,4 +529,121 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onC
+                  onClick={() => s.linha && remover.mutate(s.linha)}
+                  disabled={remover.isPending}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editando && (
+        <div className="painel space-y-4 p-4 sm:p-5">
+          <h2 className="rotulo">{editando.linha ? "Editar sindicado" : "Novo sindicado"}</h2>
+
+          <div className="space-y-1.5">
+            <Label>Militar ou Civil</Label>
+            <Select
+              value={editando.civil}
+              onValueChange={(v) =>
+                setEditando({ ...editando, civil: v as DadoSindicado["civil"] })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Militar">Militar</SelectItem>
+                <SelectItem value="Civil">Civil</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Campo
+              label="Identidade (RG ou identidade militar)"
+              value={editando.idt}
+              onChange={(v) => setEditando({ ...editando, idt: v })}
+            />
+            <Campo
+              label="CPF"
+              value={editando.cpf}
+              onChange={(v) => setEditando({ ...editando, cpf: v })}
+            />
+            <div className="space-y-1.5">
+              <Label>Data de nascimento</Label>
+              <Input
+                type="date"
+                value={editando.nascimento}
+                onChange={(e) => setEditando({ ...editando, nascimento: e.target.value })}
+              />
+            </div>
+            <Campo
+              label="Naturalidade"
+              value={editando.naturalidade}
+              onChange={(v) => setEditando({ ...editando, naturalidade: v })}
+            />
+            <Campo
+              label="Estado civil"
+              value={editando.estadoCivil}
+              onChange={(v) => setEditando({ ...editando, estadoCivil: v })}
+            />
+            <Campo
+              label="Filiação"
+              value={editando.filiacao}
+              onChange={(v) => setEditando({ ...editando, filiacao: v })}
+            />
+            <Campo
+              label="Mãe"
+              value={editando.mae}
+              onChange={(v) => setEditando({ ...editando, mae: v })}
+            />
+            <Campo
+              label="CEP"
+              value={editando.cep}
+              onChange={(v) => setEditando({ ...editando, cep: v })}
+            />
+            {editando.civil !== "Civil" && (
+              <Campo
+                label="Companhia/Unidade"
+                value={editando.companhia}
+                onChange={(v) => setEditando({ ...editando, companhia: v })}
+              />
+            )}
+            {editando.civil !== "Militar" && (
+              <Campo
+                label="Vocativo"
+                value={editando.vocativo}
+                onChange={(v) => setEditando({ ...editando, vocativo: v })}
+              />
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Endereço completo</Label>
+            <Textarea
+              value={editando.enderecoCompleto}
+              onChange={(e) => setEditando({ ...editando, enderecoCompleto: e.target.value })}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEditando(null)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => salvar.mutate(editando)}
+              disabled={salvar.isPending || !editando.civil}
+            >
+              {salvar.isPending && <Loader2 className="size-4 animate-spin" />}
+              <Save className="size-4" /> Salvar
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
