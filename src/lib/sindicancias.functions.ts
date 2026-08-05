@@ -589,6 +589,9 @@ export const restaurarVersao = createServerFn({ method: "POST" })
 
     await updateDocContent(data.documentId, versao.texto);
 
+    let avisoFormatacao: string | undefined;
+
+
     try {
       const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
       atual.autosDocId = autos.documentId;
