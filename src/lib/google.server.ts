@@ -521,6 +521,15 @@ const TITULOS_PECA: Partial<Record<string, string>> = {
   "despacho-inicial": "DESPACHO",
   "despacho-diversos": "DESPACHO",
   abertura: "TERMO DE ABERTURA",
+  notificacao: "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
+  inquiricao: "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
+  depoimento: "TERMO DE DECLARAÇÕES DO SINDICADO",
+  oficio: "OFÍCIO",
+  encerramento: "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
+  alegacoes: "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
+  prorrogacao: "PEDIDO DE PRORROGAÇÃO DE PRAZO",
+  // "relatorio" não está em PECAS (pecaId próprio, fixo, usado só em routes/relatorio.tsx).
+  relatorio: "RELATÓRIO DO SINDICANTE",
 };
 
 const ROTULOS_CAPA = ["NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:"];
