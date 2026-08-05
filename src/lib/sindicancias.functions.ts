@@ -121,11 +121,20 @@ async function sincronizarDocumentoJuntada(
 
   atual.documentos = existente
     ? atual.documentos.map((d) =>
-        d.documentId === existente.documentId ? { ...d, titulo: tituloDoc, tituloInterno } : d,
+        d.documentId === existente.documentId
+          ? { ...d, titulo: tituloDoc, tituloInterno, texto: conteudo }
+          : d,
       )
     : [
         ...atual.documentos,
-        { titulo: tituloDoc, documentId: doc.documentId, url: doc.url, pecaId, tituloInterno },
+        {
+          titulo: tituloDoc,
+          documentId: doc.documentId,
+          url: doc.url,
+          pecaId,
+          tituloInterno,
+          texto: conteudo,
+        },
       ];
 
   atual.juntadas = atual.juntadas.map((j) =>
@@ -181,7 +190,7 @@ async function sincronizarDocumentoJuntada(
           pecaId: d.pecaId,
           titulo: d.titulo,
           tituloInterno: d.tituloInterno,
-          texto: await getDocText(d.documentId),
+          texto: d.texto ?? (await getDocText(d.documentId)),
           anexos: juntadaDoItem?.anexos,
         });
       }
@@ -301,11 +310,14 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
 
     if (existenteAtivo) {
       // Guarda o texto que estava no documento antes de sobrescrever, para permitir restaurar.
-      let anterior = "";
-      try {
-        anterior = await getDocText(existenteAtivo.documentId);
-      } catch (e) {
-        console.warn("Não foi possível ler o texto anterior da peça:", e);
+      // Usa o texto já conhecido (evita 1 leitura no Google Docs) quando disponível.
+      let anterior = existenteAtivo.texto ?? "";
+      if (!existenteAtivo.texto) {
+        try {
+          anterior = await getDocText(existenteAtivo.documentId);
+        } catch (e) {
+          console.warn("Não foi possível ler o texto anterior da peça:", e);
+        }
       }
       doc = await updateDocContent(existenteAtivo.documentId, data.conteudo);
       pos = lista.findIndex((d) => d.documentId === existenteAtivo.documentId) + 1;
@@ -315,6 +327,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
               ...d,
               titulo: data.titulo,
               versoes: novaVersao(d.versoes, anterior, data.conteudo),
+              texto: data.conteudo,
             }
           : d,
       );
@@ -328,6 +341,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
         url: doc.url,
         pecaId: data.pecaId,
         versoes: existenteBruto.versoes,
+        texto: data.conteudo,
       };
     } else {
       doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
@@ -338,6 +352,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
         documentId: doc.documentId,
         url: doc.url,
         pecaId: data.pecaId,
+        texto: data.conteudo,
       });
     }
     atual.documentos = lista;
@@ -379,7 +394,10 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
           pecaId: d.pecaId,
           titulo: d.titulo,
           tituloInterno: d.tituloInterno,
-          texto: d.documentId === doc.documentId ? data.conteudo : await getDocText(d.documentId),
+          texto:
+            d.documentId === doc.documentId
+              ? data.conteudo
+              : (d.texto ?? (await getDocText(d.documentId))),
           anexos: juntadaDoItem?.anexos,
         });
       }
@@ -541,7 +559,7 @@ export const desfazerInsercao = createServerFn({ method: "POST" })
           pecaId: d.pecaId,
           titulo: d.titulo,
           tituloInterno: d.tituloInterno,
-          texto: await getDocText(d.documentId),
+          texto: d.texto ?? (await getDocText(d.documentId)),
           anexos: juntadaDoItem?.anexos,
         });
       }
@@ -588,11 +606,13 @@ export const restaurarVersao = createServerFn({ method: "POST" })
     const versao = (alvo.versoes ?? []).find((v) => v.id === data.versaoId);
     if (!versao) throw new Error("Versão não localizada no histórico desta peça.");
 
-    let atualTexto = "";
-    try {
-      atualTexto = await getDocText(data.documentId);
-    } catch (e) {
-      console.warn("Não foi possível ler o texto atual da peça:", e);
+    let atualTexto = alvo.texto ?? "";
+    if (!alvo.texto) {
+      try {
+        atualTexto = await getDocText(data.documentId);
+      } catch (e) {
+        console.warn("Não foi possível ler o texto atual da peça:", e);
+      }
     }
 
     await updateDocContent(data.documentId, versao.texto);
@@ -611,6 +631,7 @@ export const restaurarVersao = createServerFn({ method: "POST" })
             versoes: novaVersao(d.versoes, atualTexto, versao.texto).filter(
               (v) => v.id !== versao.id,
             ),
+            texto: versao.texto,
           }
         : d,
     );
@@ -634,7 +655,10 @@ export const restaurarVersao = createServerFn({ method: "POST" })
           pecaId: d.pecaId,
           titulo: d.titulo,
           tituloInterno: d.tituloInterno,
-          texto: d.documentId === data.documentId ? versao.texto : await getDocText(d.documentId),
+          texto:
+            d.documentId === data.documentId
+              ? versao.texto
+              : (d.texto ?? (await getDocText(d.documentId))),
           anexos: juntadaDoItem?.anexos,
         });
       }
