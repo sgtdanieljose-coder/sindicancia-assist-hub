@@ -52,6 +52,16 @@ export type Sindicancia = {
     tituloInterno?: string;
     /** Histórico de textos anteriores desta peça (mais antigo primeiro), para restauração. */
     versoes?: VersaoPeca[];
+    /**
+     * Texto puro já conhecido desta peça, gravado a cada criação/atualização. Existe só para
+     * evitar recarregar (getDocText) cada peça já existente do Google Docs sempre que
+     * QUALQUER outra peça é salva e o documento único precisa ser reconstruído — sem isto, o
+     * salvamento de uma única peça nova exigia 1 chamada de leitura por peça já existente,
+     * deixando o salvamento cada vez mais lento à medida que a sindicância cresce. Se ausente
+     * (registros salvos antes desta mudança, ou peça editada fora do app), o código volta a
+     * buscar do Google Docs normalmente.
+     */
+    texto?: string;
   }[];
 
   atualizadoEm: string;
