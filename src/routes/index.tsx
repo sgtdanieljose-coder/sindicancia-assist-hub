@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
+import { DashboardMetricas } from "@/components/DashboardMetricas";
 import {
   listarSindicados,
   removerSindicado,
@@ -142,6 +143,8 @@ function Dashboard() {
           <span className="min-w-0 break-words">{erro}</span>
         </div>
       )}
+
+      <DashboardMetricas itens={itens} />
 
       {itens.length > 0 && (
         <div className="painel space-y-3 p-4 sm:p-5">
