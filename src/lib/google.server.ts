@@ -386,32 +386,38 @@ export async function ensureSindicanciaFolders(nup: string) {
   };
 }
 
+/** Monta (sem chamar a API) as requests que inserem o brasão da República centralizado a
+ *  partir de um índice — reaproveitada tanto por inserirBrasao (chamada isolada) quanto pelo
+ *  laço de rebuildAutos, que a agrupa na MESMA chamada da quebra de página (ver ali) para
+ *  economizar uma rodada de rede por peça. */
+function requestsBrasao(index: number): unknown[] {
+  return [
+    {
+      insertInlineImage: {
+        location: { index },
+        uri: BRASAO_URL,
+        objectSize: {
+          height: { magnitude: 70, unit: "PT" },
+          width: { magnitude: 62, unit: "PT" },
+        },
+      },
+    },
+    {
+      updateParagraphStyle: {
+        range: { startIndex: index, endIndex: index + 1 },
+        paragraphStyle: { alignment: "CENTER" },
+        fields: "alignment",
+      },
+    },
+  ];
+}
+
 /** Insere o brasão da República centralizado no início do documento (best-effort). */
 async function inserirBrasao(documentId: string, index = 1) {
   try {
     await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
       method: "POST",
-      body: {
-        requests: [
-          {
-            insertInlineImage: {
-              location: { index },
-              uri: BRASAO_URL,
-              objectSize: {
-                height: { magnitude: 70, unit: "PT" },
-                width: { magnitude: 62, unit: "PT" },
-              },
-            },
-          },
-          {
-            updateParagraphStyle: {
-              range: { startIndex: index, endIndex: index + 1 },
-              paragraphStyle: { alignment: "CENTER" },
-              fields: "alignment",
-            },
-          },
-        ],
-      },
+      body: { requests: requestsBrasao(index) },
     });
   } catch (e) {
     console.warn("Não foi possível inserir o brasão no documento:", e);
@@ -902,11 +908,22 @@ export async function rebuildAutos(
   //    partir do próprio início, os índices das peças anteriores continuam válidos.
   for (let i = pecas.length - 1; i >= 0; i--) {
     if (i > 0) {
-      await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
-        method: "POST",
-        body: { requests: [{ insertPageBreak: { location: { index: inicios[i] } } }] },
-      });
-      await inserirBrasao(documentId, inicios[i] + 1);
+      // Quebra de página + brasão numa ÚNICA chamada (antes eram 2 chamadas por peça) —
+      // reduz pela metade o número de requisições desta etapa, que crescem com o total de
+      // peças já existentes nos autos.
+      try {
+        await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+          method: "POST",
+          body: {
+            requests: [
+              { insertPageBreak: { location: { index: inicios[i] } } },
+              ...requestsBrasao(inicios[i] + 1),
+            ],
+          },
+        });
+      } catch (e) {
+        console.warn(`Não foi possível quebrar página/inserir brasão na peça ${i + 1}:`, e);
+      }
     } else {
       await inserirBrasao(documentId, inicios[i]);
     }
