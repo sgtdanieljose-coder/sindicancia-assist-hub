@@ -138,15 +138,42 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     expect(titulo).toBe(titulo.toUpperCase());
   });
 
-  it.each(ids)("%s: 4 linhas em branco entre cabeçalho e título", (id) => {
+  // Peças que trazem o subcabeçalho do processo (NUP + portaria + filete) entre o
+  // cabeçalho institucional e o título; as demais usam o espaçamento padrão de 4 linhas.
+  const COM_SUBCABECALHO: PecaId[] = [
+    "notificacao",
+    "inquiricao",
+    "depoimento",
+    "oficio",
+    "encerramento",
+    "alegacoes",
+    "prorrogacao",
+  ];
+
+  it.each(ids.filter((id) => !COM_SUBCABECALHO.includes(id)))(
+    "%s: 4 linhas em branco entre cabeçalho e título",
+    (id) => {
+      const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
+      const ls = linhas(texto);
+      const i = indiceTitulo(texto, TITULOS_PECA[id]);
+      const brancos = ls.slice(0, i).reverse();
+      let n = 0;
+      while (brancos[n] !== undefined && brancos[n].trim() === "") n++;
+      expect(n).toBe(4);
+    },
+  );
+
+  it.each(COM_SUBCABECALHO)("%s: subcabeçalho com NUP e portaria antes do título", (id) => {
     const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
     const ls = linhas(texto);
     const i = indiceTitulo(texto, TITULOS_PECA[id]);
-    const brancos = ls.slice(0, i).reverse();
-    let n = 0;
-    while (brancos[n] !== undefined && brancos[n].trim() === "") n++;
-    expect(n).toBe(4);
+    const antes = ls.slice(0, i).join("\n");
+    expect(antes).toContain(`SINDICÂNCIA — NUP/NUD ${SINDICANCIA.nup}`);
+    expect(antes).toContain(`Portaria nr ${SINDICANCIA.portariaNumero}`);
+    expect(antes).toMatch(/_{10,}/); // filete separador
+    expect(ls[i - 1]?.trim()).toBe(""); // linha em branco imediatamente antes do título
   });
+
 
   it.each(ids.filter((id) => id !== "autos"))("%s: assinatura do sindicante ao final", (id) => {
     const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
