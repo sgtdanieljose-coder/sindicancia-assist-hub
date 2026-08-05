@@ -606,12 +606,34 @@ export type DadoSindicado = {
   filiacao: string;
   mae: string;
   enderecoCompleto: string;
-  cep: string;
+  /** Mantido só por compatibilidade — o CEP passou a integrar enderecoCompleto. */
+  cep?: string;
   /** Só faz sentido se militar. */
   companhia: string;
   /** Só faz sentido se civil. */
   vocativo: string;
 };
+
+/** Opções de estado civil oferecidas no cadastro do sindicado. */
+export const ESTADO_CIVIL_OPCOES = [
+  "Solteiro(a)",
+  "Casado(a)",
+  "Divorciado(a)",
+  "Separado(a)",
+  "Viúvo(a)",
+  "União estável",
+] as const;
+
+/** Formata progressivamente um CPF digitado (000.000.000-00). */
+export function formatarCPF(valor: string): string {
+  const d = valor.replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
+  if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+}
+
+
 
 /**
  * Monta o parágrafo de qualificação do sindicado a partir de um DadoSindicado — civil e
