@@ -19,7 +19,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
-import { DashboardMetricas } from "@/components/DashboardMetricas";
 import {
   listarSindicados,
   removerSindicado,
@@ -27,10 +26,13 @@ import {
   salvarSindicancia,
 } from "@/lib/sindicancias.functions";
 import {
+  ESTADO_CIVIL_OPCOES,
   ETAPAS,
   PRAZO_ALERTA_ANTECEDENCIA_DIAS,
   STATUS,
+  TAGS_DISPONIVEIS,
   diasCorridos,
+  formatarCPF,
   prazoTotalDias,
   type DadoSindicado,
   type Sindicancia,
@@ -77,6 +79,7 @@ const vazia: Sindicancia = {
   omInstauradora: "",
   juntadas: [],
   prazoProrrogadoDias: 0,
+  tags: [],
 };
 
 function Dashboard() {
@@ -118,6 +121,15 @@ function Dashboard() {
     }));
   };
 
+  const toggleTag = (tag: string) => {
+    setForm((f) => ({
+      ...f,
+      tags: (f.tags ?? []).includes(tag)
+        ? f.tags.filter((t) => t !== tag)
+        : [...(f.tags ?? []), tag],
+    }));
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
       <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:flex-wrap sm:justify-between">
@@ -143,8 +155,6 @@ function Dashboard() {
           <span className="min-w-0 break-words">{erro}</span>
         </div>
       )}
-
-      <DashboardMetricas itens={itens} />
 
       {itens.length > 0 && (
         <div className="painel space-y-3 p-4 sm:p-5">
@@ -332,6 +342,25 @@ function Dashboard() {
                 />
               </div>
 
+              <div className="space-y-1.5">
+                <Label>Tags (para facilitar buscas futuras)</Label>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md border border-border p-3 sm:grid-cols-3">
+                  {TAGS_DISPONIVEIS.map((tag) => (
+                    <div key={tag} className="flex items-start gap-2">
+                      <Checkbox
+                        id={`tag-${tag}`}
+                        checked={(form.tags ?? []).includes(tag)}
+                        onCheckedChange={() => toggleTag(tag)}
+                        className="mt-0.5"
+                      />
+                      <Label htmlFor={`tag-${tag}`} className="text-sm leading-snug font-normal">
+                        {tag}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <Button onClick={() => salvar.mutate(form)} disabled={salvar.isPending}>
                 {salvar.isPending ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -451,7 +480,6 @@ const SINDICADO_VAZIO: DadoSindicado = {
   filiacao: "",
   mae: "",
   enderecoCompleto: "",
-  cep: "",
   companhia: "",
   vocativo: "",
 };
@@ -571,11 +599,16 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
               value={editando.idt}
               onChange={(v) => setEditando({ ...editando, idt: v })}
             />
-            <Campo
-              label="CPF"
-              value={editando.cpf}
-              onChange={(v) => setEditando({ ...editando, cpf: v })}
-            />
+            <div className="space-y-1.5">
+              <Label>CPF</Label>
+              <Input
+                value={editando.cpf}
+                onChange={(e) => setEditando({ ...editando, cpf: formatarCPF(e.target.value) })}
+                placeholder="000.000.000-00"
+                inputMode="numeric"
+                maxLength={14}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label>Data de nascimento</Label>
               <Input
@@ -590,12 +623,7 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
               onChange={(v) => setEditando({ ...editando, naturalidade: v })}
             />
             <Campo
-              label="Estado civil"
-              value={editando.estadoCivil}
-              onChange={(v) => setEditando({ ...editando, estadoCivil: v })}
-            />
-            <Campo
-              label="Filiação"
+              label="Pai"
               value={editando.filiacao}
               onChange={(v) => setEditando({ ...editando, filiacao: v })}
             />
@@ -604,11 +632,24 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
               value={editando.mae}
               onChange={(v) => setEditando({ ...editando, mae: v })}
             />
-            <Campo
-              label="CEP"
-              value={editando.cep}
-              onChange={(v) => setEditando({ ...editando, cep: v })}
-            />
+            <div className="space-y-1.5">
+              <Label>Estado civil</Label>
+              <Select
+                value={editando.estadoCivil}
+                onValueChange={(v) => setEditando({ ...editando, estadoCivil: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ESTADO_CIVIL_OPCOES.map((opcao) => (
+                    <SelectItem key={opcao} value={opcao}>
+                      {opcao}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {editando.civil !== "Civil" && (
               <Campo
                 label="Companhia/Unidade"
@@ -630,7 +671,9 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
             <Textarea
               value={editando.enderecoCompleto}
               onChange={(e) => setEditando({ ...editando, enderecoCompleto: e.target.value })}
+              placeholder="Rua, número, bairro, cidade/UF, CEP"
             />
+            <p className="text-xs text-muted-foreground">Inclua o CEP junto ao endereço.</p>
           </div>
 
           <div className="flex justify-end gap-2">
