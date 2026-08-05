@@ -2,11 +2,88 @@ import { createServerFn } from "@tanstack/react-start";
 import {
   gerarTextoJuntada,
   type AnexoJuntada,
+  type DadoSindicado,
   type Juntada,
   type Sindicancia,
 } from "./pecas";
 import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
 import { carregar, novaVersao } from "./sindicancias.server";
+
+function rowToDadoSindicado(row: string[], linha: number): DadoSindicado {
+  return {
+    linha,
+    sindicanciaId: row[0] ?? "",
+    civil: (row[1] as DadoSindicado["civil"]) || "",
+    idt: row[2] ?? "",
+    cpf: row[3] ?? "",
+    nascimento: row[4] ?? "",
+    naturalidade: row[5] ?? "",
+    estadoCivil: row[6] ?? "",
+    filiacao: row[7] ?? "",
+    mae: row[8] ?? "",
+    enderecoCompleto: row[9] ?? "",
+    cep: row[10] ?? "",
+    companhia: row[11] ?? "",
+    vocativo: row[12] ?? "",
+  };
+}
+
+function dadoSindicadoToRow(d: DadoSindicado): string[] {
+  return [
+    d.sindicanciaId,
+    d.civil,
+    d.idt,
+    d.cpf,
+    d.nascimento,
+    d.naturalidade,
+    d.estadoCivil,
+    d.filiacao,
+    d.mae,
+    d.enderecoCompleto,
+    d.cep,
+    d.companhia,
+    d.vocativo,
+  ];
+}
+
+/** Lista os sindicados (Dados_Sindicado) vinculados a uma sindicância pelo id. */
+export const listarSindicados = createServerFn({ method: "GET" })
+  .inputValidator((data: { sindicanciaId: string }) => data)
+  .handler(async ({ data }) => {
+    const { readSindicadosRows } = await import("./google.server");
+    const rows = await readSindicadosRows();
+    return rows
+      .map((row, i) => ({ row, linha: i + 2 }))
+      .filter(({ row }) => row[0] === data.sindicanciaId)
+      .map(({ row, linha }) => rowToDadoSindicado(row, linha));
+  });
+
+/** Cria (sem `linha`) ou atualiza (com `linha`) um registro de Dados_Sindicado. */
+export const salvarSindicado = createServerFn({ method: "POST" })
+  .inputValidator((data: DadoSindicado) => data)
+  .handler(async ({ data }) => {
+    const { appendSindicadoRow, updateSindicadoRow, readSindicadosRows } =
+      await import("./google.server");
+    const row = dadoSindicadoToRow(data);
+
+    if (data.linha) {
+      await updateSindicadoRow(data.linha, row);
+      return { ...data };
+    }
+
+    await appendSindicadoRow(row);
+    const rows = await readSindicadosRows();
+    const idx = rows.map((r) => r[0]).lastIndexOf(data.sindicanciaId);
+    return { ...data, linha: idx >= 0 ? idx + 2 : undefined };
+  });
+
+/** Remove (limpa) um registro de Dados_Sindicado pela posição na planilha. */
+export const removerSindicado = createServerFn({ method: "POST" })
+  .inputValidator((data: { linha: number }) => data)
+  .handler(async ({ data }) => {
+    const { limparSindicadoRow } = await import("./google.server");
+    await limparSindicadoRow(data.linha);
+  });
 
 /**
  * Cria/atualiza o Google Doc de uma juntada específica (termo + lista de anexos + fotos/PDFs
@@ -62,7 +139,7 @@ async function sincronizarDocumentoJuntada(
   }
 
   try {
-for (const anexo of juntada.anexos) {
+    for (const anexo of juntada.anexos) {
       if (!anexo.fileId || !anexo.url) continue;
       await inserirAnexoNoFimDoDocumento(doc.documentId, {
         fileId: anexo.fileId,
@@ -264,7 +341,6 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       });
     }
     atual.documentos = lista;
-
 
     // Formatação-base (cabeçalho/título/assinatura) — mesma lógica usada no consolidado.
     let avisoFormatacao: string | undefined;
@@ -493,89 +569,9 @@ export const listarVersoes = createServerFn({ method: "POST" })
  */
 export const restaurarVersao = createServerFn({ method: "POST" })
   .inputValidator(
-    (data: {
-      sindicanciaId: string;
-      documentId: string;
-      versaoId: string;
-      pecaId?: string;
-    }) => data,
+    (data: { sindicanciaId: string; documentId: string; versaoId: string; pecaId?: string }) =>
+      data,
   )
   .handler(async ({ data }) => {
     const {
-      updateDocContent,
-      updateRow,
-      ensureAutosDoc,
-      rebuildAutos,
-      getDocText,
-      formatarPecaBasica,
-    } = await import("./google.server");
-
-    const { atual, linha } = await carregar(data.sindicanciaId);
-    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
-    if (!alvo) throw new Error("Peça não localizada nos autos.");
-    const versao = (alvo.versoes ?? []).find((v) => v.id === data.versaoId);
-    if (!versao) throw new Error("Versão não localizada no histórico desta peça.");
-
-    let atualTexto = "";
-    try {
-      atualTexto = await getDocText(data.documentId);
-    } catch (e) {
-      console.warn("Não foi possível ler o texto atual da peça:", e);
-    }
-
-    await updateDocContent(data.documentId, versao.texto);
-
-    let avisoFormatacao: string | undefined;
-    try {
-      await formatarPecaBasica(data.documentId, alvo.pecaId ?? data.pecaId);
-    } catch (e) {
-      avisoFormatacao = e instanceof Error ? e.message : "Falha ao formatar a peça restaurada.";
-    }
-
-    atual.documentos = atual.documentos.map((d) =>
-      d.documentId === data.documentId
-        ? {
-            ...d,
-            versoes: novaVersao(d.versoes, atualTexto, versao.texto).filter(
-              (v) => v.id !== versao.id,
-            ),
-          }
-        : d,
-    );
-
-    try {
-      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
-      atual.autosDocId = autos.documentId;
-      atual.autosUrl = autos.url;
-      const pecas: {
-        pecaId?: string;
-        titulo: string;
-        tituloInterno?: string;
-        texto: string;
-        anexos?: AnexoJuntada[];
-      }[] = [];
-      for (const d of atual.documentos) {
-        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-          : undefined;
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: d.documentId === data.documentId ? versao.texto : await getDocText(d.documentId),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-      await rebuildAutos(autos.documentId, pecas);
-    } catch (e) {
-      console.warn("Falha ao reconstruir o documento único após restaurar a versão:", e);
-    }
-
-    try {
-      await updateRow(linha, sindicanciaToRow(atual));
-    } catch (e) {
-      console.warn("Falha ao registrar a restauração na planilha:", e);
-    }
-
-    return { texto: versao.texto, avisoFormatacao };
-  });
+      updateDoc
