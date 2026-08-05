@@ -11,6 +11,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const itens = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -55,8 +56,12 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
+        <div className="mt-auto px-3 pb-2">
+          <ThemeToggle collapsed={collapsed} />
+        </div>
+
         {!collapsed && (
-          <div className="mt-auto px-3 pb-4 text-[11px] leading-relaxed text-muted-foreground">
+          <div className="px-3 pb-4 text-[11px] leading-relaxed text-muted-foreground">
             Portaria C Ex nr 2.394/2024 (EB10-IG-09.001) · Redação oficial EB10-IG-01.001
           </div>
         )}
