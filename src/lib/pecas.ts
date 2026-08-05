@@ -108,6 +108,7 @@ export const STATUS = [
   "Em relatório",
   "Prorrogada",
   "Concluída",
+  "Arquivada",
 ] as const;
 
 export const PECAS = [
