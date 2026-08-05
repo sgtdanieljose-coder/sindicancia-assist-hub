@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocumentosRouteImport } from './routes/documentos'
+import { Route as GraficosRouteImport } from './routes/graficos'
 import { Route as PecasRouteImport } from './routes/pecas'
 import { Route as RelatorioRouteImport } from './routes/relatorio'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const DocumentosRoute = DocumentosRouteImport.update({
   id: '/documentos',
   path: '/documentos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GraficosRoute = GraficosRouteImport.update({
+  id: '/graficos',
+  path: '/graficos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PecasRoute = PecasRouteImport.update({
@@ -38,12 +44,14 @@ const RelatorioRoute = RelatorioRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/documentos': typeof DocumentosRoute
+  '/graficos': typeof GraficosRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/documentos': typeof DocumentosRoute
+  '/graficos': typeof GraficosRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
 }
@@ -51,20 +59,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/documentos': typeof DocumentosRoute
+  '/graficos': typeof GraficosRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/documentos' | '/pecas' | '/relatorio'
+  fullPaths: '/' | '/documentos' | '/graficos' | '/pecas' | '/relatorio'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/documentos' | '/pecas' | '/relatorio'
-  id: '__root__' | '/' | '/documentos' | '/pecas' | '/relatorio'
+  to: '/' | '/documentos' | '/graficos' | '/pecas' | '/relatorio'
+  id: '__root__' | '/' | '/documentos' | '/graficos' | '/pecas' | '/relatorio'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DocumentosRoute: typeof DocumentosRoute
+  GraficosRoute: typeof GraficosRoute
   PecasRoute: typeof PecasRoute
   RelatorioRoute: typeof RelatorioRoute
 }
@@ -83,6 +93,13 @@ declare module '@tanstack/react-router' {
       path: '/documentos'
       fullPath: '/documentos'
       preLoaderRoute: typeof DocumentosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/graficos': {
+      id: '/graficos'
+      path: '/graficos'
+      fullPath: '/graficos'
+      preLoaderRoute: typeof GraficosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pecas': {
@@ -105,9 +122,20 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DocumentosRoute: DocumentosRoute,
+  GraficosRoute: GraficosRoute,
   PecasRoute: PecasRoute,
   RelatorioRoute: RelatorioRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
