@@ -102,6 +102,7 @@ export const ETAPAS = [
   "Recebimento da Portaria de instauração",
   "Autuação (Capa dos Autos de Sindicância)",
   "Termo de Abertura dos Trabalhos",
+  "Juntada inicial",
   "Despacho inicial",
   "Notificação prévia do sindicado",
   "Juntada de documentos",
