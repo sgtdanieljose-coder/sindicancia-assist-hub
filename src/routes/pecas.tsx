@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
 import { EditorPeca } from "@/components/EditorPeca";
-import { PECAS, gerarPeca, type PecaCampos, type PecaId } from "@/lib/pecas";
+import { GuiaDocumento } from "@/components/GuiaDocumento";
+import { PECAS, RODAPE_DIEX_OPCOES, gerarPeca, type PecaCampos, type PecaId } from "@/lib/pecas";
 
 export const Route = createFileRoute("/pecas")({
   head: () => ({
@@ -21,13 +22,13 @@ export const Route = createFileRoute("/pecas")({
       {
         name: "description",
         content:
-          "Gere termos, notificações, ofícios e pedidos de prorrogação nos padrões da EB10-IG-01.001 e exporte diretamente para o Google Docs.",
+          "Gere termos, notificações, ofícios, DIEx e pedidos de prorrogação nos padrões da EB10-IG-01.001 e exporte diretamente para o Google Docs.",
       },
       { property: "og:title", content: "Gerador de Peças — Sindicâncias EB" },
       {
         property: "og:description",
         content:
-          "Minutas de abertura, inquirição, juntada, encerramento e prorrogação com exportação para Google Docs.",
+          "Minutas de abertura, inquirição, juntada, DIEx, encerramento e prorrogação com exportação para Google Docs.",
       },
     ],
   }),
@@ -46,6 +47,10 @@ const camposVazios: PecaCampos = {
   justificativa: "",
   prazoDias: "",
   numeroOficio: "",
+  numeroDiex: "",
+  assunto: "",
+  referencia: "",
+  rodapeDiex: "recebimento",
 };
 
 function Pecas() {
@@ -74,6 +79,14 @@ function Pecas() {
     setCampos((c) => (c.numeroOficio ? c : { ...c, numeroOficio: String(proximo) }));
   }, [peca, selecionada]);
 
+  // Sugere o próximo número de DIEx (zero-padded a 3 dígitos, ex.: "004"), seguindo o padrão
+  // observado nos DIEx reais anexados ao projeto.
+  useEffect(() => {
+    if (peca !== "diex" || !selecionada) return;
+    const proximo = (selecionada.documentos ?? []).filter((d) => d.pecaId === "diex").length + 1;
+    setCampos((c) => (c.numeroDiex ? c : { ...c, numeroDiex: String(proximo).padStart(3, "0") }));
+  }, [peca, selecionada]);
+
   if (!selecionada) {
     return (
       <div className="p-6 text-sm text-muted-foreground">
@@ -83,7 +96,7 @@ function Pecas() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">
       <header className="min-w-0">
         <h1 className="font-serif text-2xl font-semibold">Gerador Dinâmico de Peças</h1>
         <p className="text-sm text-muted-foreground">
@@ -91,7 +104,14 @@ function Pecas() {
         </p>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[240px_320px_1fr]">
+        <GuiaDocumento
+          documentos={selecionada.documentos ?? []}
+          autosUrl={selecionada.autosUrl}
+          pecaSelecionada={peca}
+          onSelecionarPeca={setPeca}
+        />
+
         <div className="painel space-y-4 p-4">
           <div className="space-y-1.5">
             <Label>Sindicância</Label>
@@ -156,6 +176,78 @@ function Pecas() {
                   placeholder="Sugerido automaticamente; ajuste se necessário"
                 />
               </div>
+            )}
+
+            {peca === "diex" && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Número do DIEx</Label>
+                  <Input
+                    value={campos.numeroDiex}
+                    onChange={(e) => set("numeroDiex", e.target.value)}
+                    placeholder="Sugerido automaticamente; ajuste se necessário"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Ao (destinatário)</Label>
+                  <Input
+                    value={campos.destinatario}
+                    onChange={(e) => set("destinatario", e.target.value)}
+                    placeholder="Ex.: Sr Chefe da 3ª Seção"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Assunto</Label>
+                  <Input
+                    value={campos.assunto}
+                    onChange={(e) => set("assunto", e.target.value)}
+                    placeholder="Ex.: solicitação de documento"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Referência (opcional)</Label>
+                  <Input
+                    value={campos.referencia}
+                    onChange={(e) => set("referencia", e.target.value)}
+                    placeholder="Ex.: Portaria nº 66-Asse Ap As Jurd, de 14 de outubro de 2025"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Anexos (opcional)</Label>
+                  <Input
+                    value={campos.documentos}
+                    onChange={(e) => set("documentos", e.target.value)}
+                    placeholder="Ex.: cópia da Portaria nº 66..."
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Corpo do DIEx (itens numerados)</Label>
+                  <Textarea
+                    className="min-h-32"
+                    value={campos.justificativa}
+                    onChange={(e) => set("justificativa", e.target.value)}
+                    placeholder={"1. Solicito-vos...\n\n2. ..."}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Rodapé</Label>
+                  <Select
+                    value={campos.rodapeDiex}
+                    onValueChange={(v) => set("rodapeDiex", v as PecaCampos["rodapeDiex"])}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RODAPE_DIEX_OPCOES.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
             )}
 
             {(peca === "inquiricao" || peca === "oficio") && (
