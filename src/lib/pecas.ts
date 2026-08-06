@@ -102,7 +102,6 @@ export const ETAPAS = [
   "Recebimento da Portaria de instauração",
   "Autuação (Capa dos Autos de Sindicância)",
   "Termo de Abertura dos Trabalhos",
-  "Juntada inicial",
   "Despacho inicial",
   "Notificação prévia do sindicado",
   "Juntada de documentos",
@@ -182,6 +181,14 @@ export const PECAS = [
     etapa: "Notificação prévia do sindicado",
   },
   {
+    id: "diex-notificacao",
+    // O Nº 001 é sempre reservado para esta peça — ver RESERVA_DIEX_NOTIFICACAO — por isso o
+    // formulário nem mostra campo de número para ela (ao contrário do "diex" genérico).
+    nome: "DIEx — Notificação Prévia (Nº 001, reservado)",
+    unica: true,
+    etapa: "Notificação prévia do sindicado",
+  },
+  {
     id: "inquiricao",
     nome: "Termo de Inquirição de Testemunha",
     unica: false,
@@ -226,13 +233,23 @@ export type PecaCampos = {
   justificativa: string;
   prazoDias: string;
   numeroOficio: string;
-  /** Nº do DIEx (ex.: "004"), sugerido automaticamente pela tela — ver routes/pecas.tsx. */
+  /** Nº do DIEx (ex.: "004"), sugerido automaticamente pela tela — ver routes/pecas.tsx. O
+   *  Nº 001 nunca é sugerido aqui: fica reservado para "diex-notificacao" (ver
+   *  RESERVA_DIEX_NOTIFICACAO). */
   numeroDiex: string;
   assunto: string;
   /** "Referência:" do DIEx — opcional, só aparece no texto se preenchido. */
   referencia: string;
-  /** Rodapé de recebimento do DIEx, exibido depois da assinatura — ver RODAPE_DIEX_OPCOES. */
+  /** Rodapé de recebimento do DIEx, exibido depois da assinatura — ver RODAPE_DIEX_OPCOES.
+   *  Não se aplica ao "diex-notificacao", que força sempre "ciencia". */
   rodapeDiex: RodapeDiex;
+  /** Data da audiência/inquirição citada no §2 do DIEx de notificação prévia — distinta da
+   *  "Data do ato" (campo `data`), que é a data de expedição do próprio DIEx. */
+  dataAudiencia: string;
+  /** "...para fins de comprovação de seu direito a {finalidadeNotificacao}" no DIEx de
+   *  notificação prévia — texto livre porque varia caso a caso (auxílio-transporte, dano ao
+   *  erário etc.) e não é seguramente derivável de outros campos da sindicância. */
+  finalidadeNotificacao: string;
 };
 
 export const RODAPE_DIEX_OPCOES = [
@@ -242,6 +259,11 @@ export const RODAPE_DIEX_OPCOES = [
 ] as const;
 
 export type RodapeDiex = (typeof RODAPE_DIEX_OPCOES)[number]["value"];
+
+/** Número de DIEx permanentemente reservado para a notificação prévia do sindicado — mesmo
+ *  antes dela ser gerada, nenhum DIEx genérico pode usar este número (ver o efeito de
+ *  sugestão automática em routes/pecas.tsx, que já começa a contar a partir do seguinte). */
+export const RESERVA_DIEX_NOTIFICACAO = "001";
 
 export function diasCorridos(dataInicio: string) {
   if (!dataInicio) return 0;
@@ -390,6 +412,35 @@ function assinatura(s: Sindicancia) {
     "Sindicante",
     "",
   ].join("\n");
+}
+
+/** Cabeçalho de memorando comum ao "diex" e ao "diex-notificacao" — ver requestsRotulos com
+ *  ROTULOS_DIEX (google.server.ts), que deixa "EB:"/"Assunto:"/"Referência:"/"Anexos:" em
+ *  negrito reconhecendo exatamente estas linhas. */
+function cabecalhoDiex(p: {
+  numero: string;
+  nup: string;
+  local: string;
+  dataTxt: string;
+  remetente: string;
+  destinatario: string;
+  assunto: string;
+  referencia?: string;
+  anexos?: string;
+}): string[] {
+  return [
+    `DIEx Nº ${p.numero} - Sind`,
+    `EB: ${p.nup || "____________"}`,
+    `${p.local}, ${p.dataTxt}.`,
+    "",
+    `Do ${p.remetente || "Posto/Grad e Nome de Guerra"} (Sindicante)`,
+    `Ao ${p.destinatario}`,
+    "",
+    `Assunto: ${p.assunto}`,
+    ...(p.referencia ? [`Referência: ${p.referencia}`] : []),
+    ...(p.anexos ? [`Anexos: ${p.anexos}`] : []),
+    "",
+  ];
 }
 
 export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
@@ -553,19 +604,44 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
       case "diex":
         return [
           ...ESPACO_ANTES_TITULO,
-          `DIEx Nº ${c.numeroDiex || "____"} - Sind`,
-          `EB: ${s.nup || "____________"}`,
-          `${local}, ${c.data ? dataExtenso(c.data) : "__ de __________ de ____"}.`,
-          "",
-          `Do ${s.sindicante || "Posto/Grad e Nome de Guerra"} (Sindicante)`,
-          `Ao ${c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade"}`,
-          "",
-          `Assunto: ${c.assunto || "assunto do expediente"}`,
-          ...(c.referencia ? [`Referência: ${c.referencia}`] : []),
-          ...(c.documentos ? [`Anexos: ${c.documentos}`] : []),
-          "",
+          ...cabecalhoDiex({
+            numero: c.numeroDiex || "____",
+            nup: s.nup,
+            local,
+            dataTxt: c.data ? dataExtenso(c.data) : "__ de __________ de ____",
+            remetente: s.sindicante,
+            destinatario: c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade",
+            assunto: c.assunto || "assunto do expediente",
+            referencia: c.referencia,
+            anexos: c.documentos,
+          }),
           c.justificativa || "1. ...",
         ].join("\n");
+
+      // Variante fixa do DIEx para a notificação prévia do sindicado — sempre Nº 001 (ver
+      // RESERVA_DIEX_NOTIFICACAO), sempre endereçada ao sindicado cadastrado, com Assunto e
+      // Anexos (cópia da Portaria) preenchidos automaticamente a partir da própria
+      // sindicância, e sempre com o rodapé "Declaro que tenho ciência" (ver gerarRodapeDiex).
+      case "diex-notificacao": {
+        const localAutosTxt = s.localTrabalhos || s.local || "“local dos trabalhos”";
+        const anexosTxt = `- cópia da Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, do Sr ${s.autoridade || "“Autoridade Instauradora da base de dados”"}, Comandante do ${s.omInstauradora || s.om || "“OM Instauradora adicionada na base de dados”"}.`;
+        return [
+          ...ESPACO_ANTES_TITULO,
+          ...cabecalhoDiex({
+            numero: RESERVA_DIEX_NOTIFICACAO,
+            nup: s.nup,
+            local,
+            dataTxt: c.data ? dataExtenso(c.data) : "__ de __________ de ____",
+            remetente: s.sindicante,
+            destinatario: `${s.sindicado || "Posto/Grad e Nome de Guerra do sindicado"} (Sindicado)`,
+            assunto: "Notificação prévia",
+            anexos: anexosTxt,
+          }),
+          `1. Venho por meio deste, notificar Vossa Senhoria sobre os fatos a que se refere à Sindicância instaurada para apurar os fatos descritos na Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, para dar ciência e o Direito do Contraditório Administrativo e Ampla Defesa Formal, para fins de comprovação de seu direito a ${c.finalidadeNotificacao || "os fatos apurados nesta sindicância"}. Informo que a partir da data de ciência deste documento, lhe é facultado o direito de fazer vista aos respectivos autos da sindicância, na ${localAutosTxt}, bem como assegurado o direito de, pessoalmente ou por intermédio de advogado constituído, no prazo de 03 (três) dias úteis contados de sua inquirição, oferecer defesa prévia, juntar documentos e requerer o que julgar de direito; podendo, ainda, oferecer alegações finais e praticar todos os demais atos necessários ao exercício do contraditório e da ampla defesa.`,
+          "",
+          `2. A audiência para sua inquirição está marcada para o dia ${c.dataAudiencia ? dataExtenso(c.dataAudiencia) : "__ de __________ de ____"}, às ${c.hora || "__:__"} horas, na ${localAutosTxt}, do ${s.om || "“OM adicionada na base de dados”"}.`,
+        ].join("\n");
+      }
 
       case "encerramento":
         return [
@@ -617,12 +693,20 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
 
 /** Rodapé de "Declaro que tenho ciência:" ou "Recebimento:" acrescentado DEPOIS da assinatura,
  *  exclusivo do DIEx — as demais peças não têm nada após a assinatura, então não usam isto.
+ *  O "diex-notificacao" sempre leva "ciência" (é sempre endereçado ao sindicado, e o rodapé
+ *  não é configurável pelo formulário para essa peça — ver routes/pecas.tsx).
  *  Ver requestsAssinaturaDiex em google.server.ts, que localiza a assinatura considerando
  *  esse conteúdo extra (em vez de assumir que a assinatura são sempre os 2 últimos
  *  parágrafos do documento, convenção que essas duas linhas quebrariam). */
 function gerarRodapeDiex(peca: PecaId, c: PecaCampos): string {
-  if (peca !== "diex" || !c.rodapeDiex || c.rodapeDiex === "nenhum") return "";
-  const rotulo = c.rodapeDiex === "ciencia" ? "Declaro que tenho ciência:" : "Recebimento:";
+  const tipo =
+    peca === "diex-notificacao"
+      ? "ciencia"
+      : peca === "diex" && c.rodapeDiex !== "nenhum"
+        ? c.rodapeDiex
+        : undefined;
+  if (!tipo) return "";
+  const rotulo = tipo === "ciencia" ? "Declaro que tenho ciência:" : "Recebimento:";
   return ["", rotulo, "", "Dia ..../....../....... às....... horas", "", "_".repeat(36)].join("\n");
 }
 
