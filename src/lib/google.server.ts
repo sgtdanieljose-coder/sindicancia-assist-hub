@@ -737,9 +737,10 @@ function gruposFormatacaoPeca(
   }
   if (pecaId === "autos") {
     grupos.push({ nome: "rótulos da capa", requests: requestsRotulos(paragrafos, ROTULOS_CAPA) });
-  } else if (pecaId === "diex") {
-    // O DIEx não tem um título centralizado (é um memorando, não um termo) — só os rótulos
-    // do cabeçalho em negrito e a assinatura localizada antes do rodapé de ciência/recebimento.
+  } else if (pecaId === "diex" || pecaId === "diex-notificacao") {
+    // O DIEx (nas duas variantes) não tem um título centralizado (é um memorando, não um
+    // termo) — só os rótulos do cabeçalho em negrito e a assinatura localizada antes do
+    // rodapé de ciência/recebimento.
     grupos.push({ nome: "rótulos do DIEx", requests: requestsRotulos(paragrafos, ROTULOS_DIEX) });
     grupos.push({ nome: "assinatura", requests: requestsAssinaturaDiex(paragrafos) });
   } else {
