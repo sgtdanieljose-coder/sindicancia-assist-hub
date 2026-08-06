@@ -540,6 +540,12 @@ const TITULOS_PECA: Partial<Record<string, string>> = {
 
 const ROTULOS_CAPA = ["NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:"];
 
+/** Rótulos do cabeçalho de um DIEx (ver o case "diex" em pecas.ts) postos em negrito. Não
+ *  inclui "Do "/"Ao " porque, ao contrário dos demais, esses prefixos não são seguidos de
+ *  ":" e o valor começa colado ao rótulo (ex.: "Do 1º Sgt..."), o que tornaria o negrito
+ *  visualmente confuso; os rótulos abaixo são sempre "RÓTULO: valor". */
+const ROTULOS_DIEX = ["EB:", "Assunto:", "Referência:", "Anexos:"];
+
 /** Cabeçalho (tudo antes do título) em negrito+centralizado; título em negrito+sublinhado+
  *  centralizado. Não faz nada se o título não for encontrado (evita negritar o documento
  *  inteiro por engano quando a peça ainda não tem uma convenção de título cadastrada). */
@@ -622,11 +628,11 @@ function requestsCorpoJustificado(paragrafos: Paragrafo[], titulo: string): unkn
   return requests;
 }
 
-/** Assinatura final: sempre os dois últimos parágrafos não vazios — nome centralizado (peso
- *  normal) e função/cargo (última linha) centralizada e em negrito. Não usar na Capa, que
- *  não tem assinatura. */
-function requestsAssinatura(paragrafos: Paragrafo[]): unknown[] {
-  const naoVazios = paragrafos.filter((p) => p.texto.trim());
+/** Núcleo da formatação de assinatura (nome centralizado + função em negrito), aplicado aos
+ *  2 últimos parágrafos não vazios de uma FATIA já delimitada por quem chama — ver
+ *  requestsAssinatura (fatia = documento inteiro) e requestsAssinaturaDiex (fatia = tudo
+ *  antes do rodapé de ciência/recebimento). */
+function requestsAssinaturaEm(naoVazios: Paragrafo[]): unknown[] {
   if (naoVazios.length < 2) return [];
 
   const requests: unknown[] = [];
@@ -659,14 +665,35 @@ function requestsAssinatura(paragrafos: Paragrafo[]): unknown[] {
   return requests;
 }
 
-/** Rótulos NUP:/SINDICANTE:/SINDICADO:/OBJETO: em negrito (mantendo o valor em texto normal) —
- *  específico da Capa dos Autos, que não segue o padrão corpo+assinatura das demais peças. */
-function requestsRotulosCapa(paragrafos: Paragrafo[]): unknown[] {
+/** Assinatura final: sempre os dois últimos parágrafos não vazios — nome centralizado (peso
+ *  normal) e função/cargo (última linha) centralizada e em negrito. Não usar na Capa, que
+ *  não tem assinatura. */
+function requestsAssinatura(paragrafos: Paragrafo[]): unknown[] {
+  return requestsAssinaturaEm(paragrafos.filter((p) => p.texto.trim()));
+}
+
+/** Marcadores literais que abrem o rodapé de um DIEx (ver gerarRodapeDiex em pecas.ts). */
+const MARCADORES_RODAPE_DIEX = ["Declaro que tenho ciência:", "Recebimento:"];
+
+/** Como requestsAssinatura, mas localizando a assinatura pelos 2 parágrafos que vêm ANTES do
+ *  rodapé de ciência/recebimento — o DIEx é a única peça com conteúdo depois da assinatura,
+ *  o que quebraria a convenção de "os 2 últimos parágrafos do documento" usada pelas demais. */
+function requestsAssinaturaDiex(paragrafos: Paragrafo[]): unknown[] {
+  const naoVazios = paragrafos.filter((p) => p.texto.trim());
+  const idxRodape = naoVazios.findIndex((p) =>
+    MARCADORES_RODAPE_DIEX.includes(p.texto.replace(/\n$/, "").trim()),
+  );
+  return requestsAssinaturaEm(idxRodape >= 0 ? naoVazios.slice(0, idxRodape) : naoVazios);
+}
+
+/** Rótulos (ex.: "NUP:", "Assunto:") em negrito no início da linha, mantendo o valor em
+ *  texto normal — usado tanto na Capa dos Autos quanto no cabeçalho do DIEx. */
+function requestsRotulos(paragrafos: Paragrafo[], rotulos: string[]): unknown[] {
   const requests: unknown[] = [];
   for (const p of paragrafos) {
     const texto = p.texto.replace(/\n$/, "");
     const conteudo = texto.trim();
-    const rotulo = ROTULOS_CAPA.find((r) => conteudo.startsWith(r));
+    const rotulo = rotulos.find((r) => conteudo.startsWith(r));
     if (!rotulo) continue;
     const recuo = texto.length - texto.trimStart().length;
     const inicioRotulo = p.startIndex + recuo;
@@ -709,7 +736,12 @@ function gruposFormatacaoPeca(
     }
   }
   if (pecaId === "autos") {
-    grupos.push({ nome: "rótulos da capa", requests: requestsRotulosCapa(paragrafos) });
+    grupos.push({ nome: "rótulos da capa", requests: requestsRotulos(paragrafos, ROTULOS_CAPA) });
+  } else if (pecaId === "diex") {
+    // O DIEx não tem um título centralizado (é um memorando, não um termo) — só os rótulos
+    // do cabeçalho em negrito e a assinatura localizada antes do rodapé de ciência/recebimento.
+    grupos.push({ nome: "rótulos do DIEx", requests: requestsRotulos(paragrafos, ROTULOS_DIEX) });
+    grupos.push({ nome: "assinatura", requests: requestsAssinaturaDiex(paragrafos) });
   } else {
     grupos.push({ nome: "assinatura", requests: requestsAssinatura(paragrafos) });
   }
