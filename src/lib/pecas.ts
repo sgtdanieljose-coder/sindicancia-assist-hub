@@ -193,6 +193,7 @@ export const PECAS = [
     etapa: "Depoimento do sindicado",
   },
   { id: "oficio", nome: "Ofício / Mandado de Intimação", unica: false, etapa: undefined },
+  { id: "diex", nome: "DIEx — Documento Interno de Expediente", unica: false, etapa: undefined },
   {
     id: "encerramento",
     nome: "Termo de Encerramento da Instrução",
@@ -216,13 +217,30 @@ export type PecaCampos = {
   hora: string;
   destinatario: string;
   qualificacao: string;
+  /** Reaproveitado como "Anexos" no DIEx (ver case "diex" em gerarPeca). */
   documentos: string;
   perguntas: string;
   respostas: string;
+  /** Reaproveitado como o corpo (itens numerados) do DIEx. */
   justificativa: string;
   prazoDias: string;
   numeroOficio: string;
+  /** Nº do DIEx (ex.: "004"), sugerido automaticamente pela tela — ver routes/pecas.tsx. */
+  numeroDiex: string;
+  assunto: string;
+  /** "Referência:" do DIEx — opcional, só aparece no texto se preenchido. */
+  referencia: string;
+  /** Rodapé de recebimento do DIEx, exibido depois da assinatura — ver RODAPE_DIEX_OPCOES. */
+  rodapeDiex: RodapeDiex;
 };
+
+export const RODAPE_DIEX_OPCOES = [
+  { value: "recebimento", label: "Recebimento" },
+  { value: "ciencia", label: "Declaro que tenho ciência" },
+  { value: "nenhum", label: "Nenhum" },
+] as const;
+
+export type RodapeDiex = (typeof RODAPE_DIEX_OPCOES)[number]["value"];
 
 export function diasCorridos(dataInicio: string) {
   if (!dataInicio) return 0;
@@ -527,6 +545,27 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           "3. Coloco-me à disposição para os esclarecimentos que se fizerem necessários.",
         ].join("\n");
 
+      // O DIEx é um memorando interno simples (sem o padrão termo/despacho das demais peças),
+      // por isso não tem título centralizado nem corpo justificado — ver o comentário em
+      // ROTULOS_DIEX/gruposFormatacaoPeca (google.server.ts). O rodapé de recebimento/ciência
+      // é adicionado DEPOIS da assinatura pelo wrapper final de gerarPeca, não aqui.
+      case "diex":
+        return [
+          ...ESPACO_ANTES_TITULO,
+          `DIEx Nº ${c.numeroDiex || "____"} - Sind`,
+          `EB: ${s.nup || "____________"}`,
+          `${local}, ${c.data ? dataExtenso(c.data) : "__ de __________ de ____"}.`,
+          "",
+          `Do ${s.sindicante || "Posto/Grad e Nome de Guerra"} (Sindicante)`,
+          `Ao ${c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade"}`,
+          "",
+          `Assunto: ${c.assunto || "assunto do expediente"}`,
+          ...(c.referencia ? [`Referência: ${c.referencia}`] : []),
+          ...(c.documentos ? [`Anexos: ${c.documentos}`] : []),
+          "",
+          c.justificativa || "1. ...",
+        ].join("\n");
+
       case "encerramento":
         return [
           subcabecalhoProcesso(s),
@@ -572,7 +611,18 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
     }
   })();
 
-  return `${head}${corpo}\n${assinatura(s)}`;
+  return `${head}${corpo}\n${assinatura(s)}${gerarRodapeDiex(peca, c)}`;
+}
+
+/** Rodapé de "Declaro que tenho ciência:" ou "Recebimento:" acrescentado DEPOIS da assinatura,
+ *  exclusivo do DIEx — as demais peças não têm nada após a assinatura, então não usam isto.
+ *  Ver requestsAssinaturaDiex em google.server.ts, que localiza a assinatura considerando
+ *  esse conteúdo extra (em vez de assumir que a assinatura são sempre os 2 últimos
+ *  parágrafos do documento, convenção que essas duas linhas quebrariam). */
+function gerarRodapeDiex(peca: PecaId, c: PecaCampos): string {
+  if (peca !== "diex" || !c.rodapeDiex || c.rodapeDiex === "nenhum") return "";
+  const rotulo = c.rodapeDiex === "ciencia" ? "Declaro que tenho ciência:" : "Recebimento:";
+  return ["", rotulo, "", "Dia ..../....../....... às....... horas", "", "_".repeat(36)].join("\n");
 }
 
 /**
