@@ -361,7 +361,7 @@ const linha = "_".repeat(66);
 // ====================================================================================
 
 /** Linhas em branco padrão entre o cabeçalho institucional e o título de qualquer peça. */
-const ESPACO_ANTES_TITULO = ["", "", "", "", ""];
+const ESPACO_ANTES_TITULO = ["", "", "", ""];
 
 /** Cabeçalho institucional obrigatório — o brasão é inserido como imagem acima destas linhas. */
 export function cabecalho(s: Sindicancia) {
