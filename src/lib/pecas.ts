@@ -1,376 +1,768 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useSindicancias } from "@/components/SindicanciaContext";
-import { EditorPeca } from "@/components/EditorPeca";
-import { GuiaDocumento } from "@/components/GuiaDocumento";
-import {
-  PECAS,
-  RESERVA_DIEX_NOTIFICACAO,
-  RODAPE_DIEX_OPCOES,
-  gerarPeca,
-  type PecaCampos,
-  type PecaId,
-} from "@/lib/pecas";
-
-export const Route = createFileRoute("/pecas")({
-  head: () => ({
-    meta: [
-      { title: "Gerador de Peças Jurídico-Administrativas | Sindicâncias EB" },
-      {
-        name: "description",
-        content:
-          "Gere termos, notificações, ofícios, DIEx e pedidos de prorrogação nos padrões da EB10-IG-01.001 e exporte diretamente para o Google Docs.",
-      },
-      { property: "og:title", content: "Gerador de Peças — Sindicâncias EB" },
-      {
-        property: "og:description",
-        content:
-          "Minutas de abertura, inquirição, juntada, DIEx, encerramento e prorrogação com exportação para Google Docs.",
-      },
-    ],
-  }),
-  component: Pecas,
-});
-
-const camposVazios: PecaCampos = {
-  local: "",
-  data: new Date().toISOString().slice(0, 10),
-  hora: "",
-  destinatario: "",
-  qualificacao: "",
-  documentos: "",
-  perguntas: "",
-  respostas: "",
-  justificativa: "",
-  prazoDias: "",
-  numeroOficio: "",
-  numeroDiex: "",
-  assunto: "",
-  referencia: "",
-  rodapeDiex: "recebimento",
-  dataAudiencia: "",
-  finalidadeNotificacao: "",
+export type AnexoJuntada = {
+  id: string;
+  /** Texto digitado livremente — pode ter vírgula, dois-pontos etc., ao contrário do nome do arquivo. */
+  descricao: string;
+  /** Presentes só quando um arquivo foi anexado a este item. */
+  fileId?: string;
+  url?: string;
+  mimeType?: string;
+  nomeArquivo?: string;
+  /** Documento (folha própria) deste anexo específico, se houver arquivo. */
+  documentId?: string;
+  docUrl?: string;
 };
 
-function Pecas() {
-  const { itens, selecionada, setSelecionadaId, recarregar } = useSindicancias();
-  const [peca, setPeca] = useState<PecaId>("abertura");
-  const [campos, setCampos] = useState<PecaCampos>(camposVazios);
-  const [texto, setTexto] = useState("");
+export type Juntada = {
+  id: string;
+  numero: number;
+  titulo: string;
+  data: string;
+  anexos: AnexoJuntada[];
+  /** Documento (Google Docs) desta juntada — termo + lista de anexos incorporada. */
+  documentId?: string;
+  url?: string;
+};
 
-  const gerado = useMemo(
-    () => (selecionada ? gerarPeca(peca, selecionada, campos) : ""),
-    [peca, selecionada, campos],
-  );
+/** Snapshot do texto de uma peça, guardado a cada exportação/atualização. */
+export type VersaoPeca = {
+  id: string;
+  texto: string;
+  criadoEm: string;
+};
 
-  useEffect(() => setTexto(gerado), [gerado]);
+export type Sindicancia = {
+  id: string;
+  nup: string;
+  portariaNumero: string;
+  portariaData: string;
+  om: string;
+  autoridade: string;
+  sindicante: string;
+  sindicado: string;
+  objeto: string;
+  status: string;
+  etapas: string[];
+  documentos: {
+    titulo: string;
+    documentId: string;
+    url: string;
+    pecaId?: string;
+    /** Título literal esperado DENTRO do corpo do texto (quando difere do TITULOS_PECA
+     *  estático — ex.: cada juntada tem seu próprio "JUNTADA Nº N"). */
+    tituloInterno?: string;
+    /** Histórico de textos anteriores desta peça (mais antigo primeiro), para restauração. */
+    versoes?: VersaoPeca[];
+    /**
+     * Texto puro já conhecido desta peça, gravado a cada criação/atualização. Existe só para
+     * evitar recarregar (getDocText) cada peça já existente do Google Docs sempre que
+     * QUALQUER outra peça é salva e o documento único precisa ser reconstruído — sem isto, o
+     * salvamento de uma única peça nova exigia 1 chamada de leitura por peça já existente,
+     * deixando o salvamento cada vez mais lento à medida que a sindicância cresce. Se ausente
+     * (registros salvos antes desta mudança, ou peça editada fora do app), o código volta a
+     * buscar do Google Docs normalmente.
+     */
+    texto?: string;
+  }[];
 
-  const set = (k: keyof PecaCampos, v: string) => setCampos((c) => ({ ...c, [k]: v }));
-  const pecaAtual = PECAS.find((p) => p.id === peca);
-  const nome = pecaAtual?.nome ?? "Peça";
-  const unica = pecaAtual?.unica ?? false;
-  const etapa = pecaAtual?.etapa;
+  atualizadoEm: string;
+  /** Pasta da sindicância no Drive (nome = NUP), criada automaticamente ao salvar. */
+  pastaId?: string;
+  pastaUrl?: string;
+  /** Subpasta "Anexos" dentro da pasta da sindicância. */
+  anexosId?: string;
+  anexosUrl?: string;
+  /** Cidade/localidade em que os atos são lavrados. */
+  local: string;
+  /** Local específico dos trabalhos (onde serão feitas as oitivas) — ex.: sala/prédio, distinto da cidade. */
+  localTrabalhos: string;
+  /** Subordinação da OM (ex.: "12ª Brigada de Infantaria Leve"). */
+  subordinacao: string;
+  /** OM instauradora (comando que expediu a portaria). */
+  omInstauradora: string;
+  /** Documento único (autos paginados) no Google Docs. */
+  autosDocId?: string;
+  autosUrl?: string;
+  /** Juntadas do processo, cada uma com seus anexos vinculados ao NUP. */
+  juntadas: Juntada[];
+  /** Dias adicionais concedidos por prorrogação (somados aos 30 dias corridos regulamentares). */
+  prazoProrrogadoDias?: number;
+  /** Marcadores livres para categorizar a sindicância e facilitar buscas futuras. */
+  tags: string[];
+};
 
-  // Sugere o próximo número de ofício com base em quantos já foram exportados nesta sindicância.
-  useEffect(() => {
-    if (peca !== "oficio" || !selecionada) return;
-    const proximo = (selecionada.documentos ?? []).filter((d) => d.pecaId === "oficio").length + 1;
-    setCampos((c) => (c.numeroOficio ? c : { ...c, numeroOficio: String(proximo) }));
-  }, [peca, selecionada]);
+export const PRAZO_BASE_DIAS = 30;
+export const PRAZO_ALERTA_ANTECEDENCIA_DIAS = 10;
 
-  // Sugere o próximo número de DIEx (zero-padded a 3 dígitos, ex.: "004"), seguindo o padrão
-  // observado nos DIEx reais anexados ao projeto. O Nº 001 nunca é sugerido aqui: fica
-  // reservado para a "diex-notificacao" (ver RESERVA_DIEX_NOTIFICACAO), então a contagem já
-  // começa em 002 — independentemente de a notificação prévia já ter sido gerada ou não.
-  useEffect(() => {
-    if (peca !== "diex" || !selecionada) return;
-    const quantidade = (selecionada.documentos ?? []).filter((d) => d.pecaId === "diex").length;
-    setCampos((c) =>
-      c.numeroDiex ? c : { ...c, numeroDiex: String(quantidade + 2).padStart(3, "0") },
-    );
-  }, [peca, selecionada]);
+/** Prazo total (dias corridos), somando eventual prorrogação já registrada. */
+export function prazoTotalDias(s: Pick<Sindicancia, "prazoProrrogadoDias">): number {
+  return PRAZO_BASE_DIAS + (s.prazoProrrogadoDias || 0);
+}
 
-  if (!selecionada) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">
-        Cadastre uma sindicância no painel para gerar peças.
-      </div>
-    );
+export const ETAPAS = [
+  "Recebimento da Portaria de instauração",
+  "Autuação (Capa dos Autos de Sindicância)",
+  "Termo de Abertura dos Trabalhos",
+  "Despacho inicial",
+  "Notificação prévia do sindicado",
+  "Juntada de documentos",
+  "Inquirição de testemunhas",
+  "Depoimento do sindicado",
+  "Diligências complementares",
+  "Encerramento da instrução",
+  "Alegações finais",
+  "Relatório do Sindicante",
+  "Remessa à autoridade instauradora",
+];
+
+export const STATUS = [
+  "Em instrução",
+  "Aguardando alegações finais",
+  "Em relatório",
+  "Prorrogada",
+  "Concluída",
+  "Arquivada",
+] as const;
+
+/** Lista fixa de tags para categorizar sindicâncias e facilitar buscas futuras. */
+export const TAGS_DISPONIVEIS = [
+  "Acidente de SV",
+  "Dano ao Erário",
+  "Reinclusão de Dependente",
+  "Desídia de Adido",
+  "Anulação de Incorporação",
+  "Irregularidade na Incorporação",
+  "Recuperação de Adido",
+  "Aux Transporte",
+  "Acumulo de Benefício",
+  "Dano Material",
+  "Dano Pessoal",
+  "Nexo Causal",
+  "Incapacidade Física Temporária",
+  "Desaparecimento de material",
+  "Perda de armamento",
+  "Extravio de munição",
+  "Acidentes durante instrução",
+  "Acidentes em serviço",
+  "Documentos sigilosos",
+  "Reconhecimento de direitos",
+  "Auxílio-fardamento",
+  "Outros",
+] as const;
+
+/**
+ * Peças suportadas pelo gerador, com a etapa do checklist que cada uma marca ao ser
+ * exportada. Correspondência aproximada com os modelos do Anexo da EB10-IG-01.001
+ * (nem toda peça daqui tem um modelo 1:1 na IG — o app usa a MESMA convenção-base
+ * (cabeçalho, margens, fonte, recuo, assinatura — ver o bloco de comentários logo
+ * acima de ESPACO_ANTES_TITULO) para qualquer peça, prevista na IG ou não):
+ *   - abertura, despacho-inicial, despacho-diversos, encerramento: art. 66, IX
+ *     (Termo) / despacho de mero expediente — não têm modelo gráfico próprio na IG,
+ *     por isso reaproveitam a convenção-base.
+ *   - notificacao, alegacoes, oficio, prorrogacao: adaptações do Ofício (Anexo I.1,
+ *     Fig A-1/A-2.1/A-2.2).
+ *   - inquiricao, depoimento: rito de sindicância (EB10-IG-09.001), não da
+ *     correspondência — também seguem a convenção-base deste app.
+ */
+export const PECAS = [
+  {
+    id: "autos",
+    nome: "Autos de Sindicância (Capa)",
+    unica: true,
+    etapa: "Autuação (Capa dos Autos de Sindicância)",
+  },
+  {
+    id: "abertura",
+    nome: "Termo de Abertura dos Trabalhos",
+    unica: true,
+    etapa: "Termo de Abertura dos Trabalhos",
+  },
+  {
+    id: "despacho-inicial",
+    nome: "Despacho Inicial",
+    unica: true,
+    etapa: "Despacho inicial",
+  },
+  {
+    id: "despacho-diversos",
+    nome: "Despachos Diversos",
+    unica: false,
+    etapa: undefined,
+  },
+  {
+    id: "notificacao",
+    nome: "Notificação Prévia do Sindicado",
+    unica: true,
+    etapa: "Notificação prévia do sindicado",
+  },
+  {
+    id: "inquiricao",
+    nome: "Termo de Inquirição de Testemunha",
+    unica: false,
+    etapa: "Inquirição de testemunhas",
+  },
+  {
+    id: "depoimento",
+    nome: "Termo de Depoimento do Sindicado",
+    unica: true,
+    etapa: "Depoimento do sindicado",
+  },
+  { id: "oficio", nome: "Ofício / Mandado de Intimação", unica: false, etapa: undefined },
+  {
+    id: "encerramento",
+    nome: "Termo de Encerramento da Instrução",
+    unica: true,
+    etapa: "Encerramento da instrução",
+  },
+  {
+    id: "alegacoes",
+    nome: "Notificação para Alegações Finais",
+    unica: true,
+    etapa: "Alegações finais",
+  },
+  { id: "prorrogacao", nome: "Pedido de Prorrogação de Prazo", unica: false, etapa: undefined },
+] as const;
+
+export type PecaId = (typeof PECAS)[number]["id"];
+
+export type PecaCampos = {
+  local: string;
+  data: string;
+  hora: string;
+  destinatario: string;
+  qualificacao: string;
+  documentos: string;
+  perguntas: string;
+  respostas: string;
+  justificativa: string;
+  prazoDias: string;
+  numeroOficio: string;
+};
+
+export function diasCorridos(dataInicio: string) {
+  if (!dataInicio) return 0;
+  const inicio = new Date(`${dataInicio}T00:00:00`);
+  if (Number.isNaN(inicio.getTime())) return 0;
+  const hoje = new Date();
+  return Math.floor((hoje.getTime() - inicio.getTime()) / 86_400_000);
+}
+
+const EXTENSO_NUM = [
+  "zero",
+  "um",
+  "dois",
+  "três",
+  "quatro",
+  "cinco",
+  "seis",
+  "sete",
+  "oito",
+  "nove",
+  "dez",
+  "onze",
+  "doze",
+  "treze",
+  "quatorze",
+  "quinze",
+  "dezesseis",
+  "dezessete",
+  "dezoito",
+  "dezenove",
+  "vinte",
+  "vinte e um",
+  "vinte e dois",
+  "vinte e três",
+  "vinte e quatro",
+  "vinte e cinco",
+  "vinte e seis",
+  "vinte e sete",
+  "vinte e oito",
+  "vinte e nove",
+  "trinta",
+  "trinta e um",
+];
+
+const MESES = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+
+function anoExtenso(ano: number) {
+  // Ex.: 2026 -> "dois mil e vinte e seis"
+  const milhar = Math.floor(ano / 1000);
+  const resto = ano % 1000;
+  const base = milhar === 2 ? "dois mil" : `${EXTENSO_NUM[milhar] ?? milhar} mil`;
+  if (resto === 0) return base;
+  const centena = Math.floor(resto / 100);
+  const dezena = resto % 100;
+  const centenas = [
+    "",
+    "cento",
+    "duzentos",
+    "trezentos",
+    "quatrocentos",
+    "quinhentos",
+    "seiscentos",
+    "setecentos",
+    "oitocentos",
+    "novecentos",
+  ][centena];
+  const partes = [centenas, dezena ? (EXTENSO_NUM[dezena] ?? `${dezena}`) : ""].filter(Boolean);
+  return `${base} e ${partes.join(" e ")}`;
+}
+
+/** "Aos vinte e três dias do mês de julho de dois mil e vinte e seis" */
+export function dataPorExtenso(iso: string) {
+  if (!iso) return "____ dias do mês de __________ de ______";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const dia = d.getDate();
+  return `${EXTENSO_NUM[dia] ?? dia} dias do mês de ${MESES[d.getMonth()]} de ${anoExtenso(d.getFullYear())}`;
+}
+
+/**
+ * "4 de março de 2026" (dia sem zero à esquerda) ou "1º de maio de 2026" (dia 1
+ * sempre com o indicativo ordinal "º") — art. 51, I e II, da EB10-IG-01.001, que dá
+ * exatamente esses dois exemplos ("4 de março... e não 04 de março..."; "1º de
+ * maio... e não 1 de maio..."). A versão anterior usava
+ * `toLocaleDateString(..., { day: "2-digit" })`, que sempre preenchia o dia com
+ * zero à esquerda (ex.: "04 de julho") — o contrário do que a IG pede. Usa o
+ * array MESES (o mesmo de dataPorExtenso) em vez de depender de dados de locale
+ * do runtime para o nome do mês.
+ */
+function dataExtenso(iso: string) {
+  if (!iso) return "____ de __________ de ______";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const dia = d.getDate();
+  const diaTxt = dia === 1 ? "1º" : String(dia);
+  return `${diaTxt} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+const linha = "_".repeat(66);
+
+// ====================================================================================
+// Convenção de formatação-base de TODA peça (documento individual e a cópia dela dentro
+// do documento único dos autos — aplicada em src/lib/google.server.ts, que usa a MESMA
+// lógica nos dois lugares para nunca ficarem dessincronizados), alinhada à
+// EB10-IG-01.001 (Instruções Gerais para a Correspondência do Exército, folhas 7 a 76):
+//   1) Brasão da República no topo, a 1 cm da borda superior da folha (art. 24 c/c a
+//      margem superior de 1 cm — ver MARGEM_SUPERIOR_PT em google.server.ts: como o
+//      brasão é sempre o 1º conteúdo do corpo, ele já nasce a 1 cm do topo).
+//   2) Margens da folha: 1 cm (superior), mínimo 2 cm (inferior), 3 cm (esquerda) e
+//      1,5 cm (direita) — art. 25. Aplicadas em requestsMargens (google.server.ts).
+//   3) Fonte Times New Roman, 12 no corpo do texto e 10 no rodapé/identificação de
+//      página, com espaçamento simples entre linhas — arts. 26 e 28. Aplicadas em
+//      requestsFontePadrao (google.server.ts).
+//   4) Cabeçalho institucional (timbre / Subordinação) em negrito, centralizado e
+//      sempre em letras maiúsculas — art. 24 (ver cabecalho() logo abaixo).
+//   5) 4 linhas em branco entre o cabeçalho e o título da peça — ver
+//      ESPACO_ANTES_TITULO. (Convenção própria deste sistema: a IG não fixa um
+//      número de linhas aqui, e ofícios/DIEx reais nem têm um "título" destacado —
+//      este app usa um título em negrito em toda peça, por clareza e uniformidade.)
+//   6) Título da peça em negrito, sublinhado e centralizado.
+//   7) Corpo do texto (peças com parágrafo narrativo) justificado, com recuo de
+//      primeira linha de 1,5 cm além da margem esquerda — art. 27 ("o início do
+//      texto será entre 4,5 a 5 cm de distância da margem esquerda"; como a margem
+//      já é de 3 cm, o recuo extra é de 1,5 a 2 cm — ver RECUO_PRIMEIRA_LINHA_PT).
+//   8) Assinatura ao final (art. 57, I e II): sem traço horizontal, tudo
+//      centralizado; NOME em negrito e maiúsculo (1ª linha) e função/cargo (ex.:
+//      "Sindicante") SEM negrito (2ª linha) — sempre as duas últimas linhas não
+//      vazias. O negrito certo (nome, não função) é aplicado em requestsAssinatura
+//      (google.server.ts); a função assinatura() abaixo só cuida do espaçamento
+//      mínimo de 3 linhas em branco antes da assinatura, pedido pelo art. 57, e a
+//      formatação também marca esse trecho para não ficar isolado numa página
+//      própria (art. 45 — ver requestsEvitarAssinaturaIsolada).
+//      OBS.: as variantes de assinatura delegada ("Por ordem", "Por delegação", "No
+//      impedimento de" — art. 57, IV a VII) ainda não têm campo próprio no
+//      formulário; se forem necessárias, é preciso adicionar um campo à
+//      Sindicancia (ex.: `assinaturaDelegada`) e um novo bloco de texto aqui.
+//   9) Abreviatura de "número": sempre "nº" (não "nr") para Portaria e Ofício —
+//      art. 60 (que reserva "Nr" para "os demais documentos militares" e "nº"/"Nº"
+//      para correspondências e atos normativos/ordinatórios como esses). Ver
+//      subcabecalhoProcesso() e os casos de gerarPeca() abaixo.
+//
+// Ao escrever uma peça nova: comece o corpo com ...ESPACO_ANTES_TITULO, "TÍTULO DA PEÇA",
+// "", <corpo>, e cadastre esse título literal em TITULOS_PECA (google.server.ts) — o resto
+// (negrito/centralização/sublinhado/justificado/assinatura/margens/fonte, nos dois
+// documentos) é automático.
+// ====================================================================================
+
+/** Linhas em branco padrão entre o cabeçalho institucional e o título de qualquer peça. */
+const ESPACO_ANTES_TITULO = ["", "", "", ""];
+
+/** Cabeçalho institucional obrigatório — o brasão é inserido como imagem acima destas linhas.
+ *  Art. 24: 1ª linha "MINISTÉRIO DA DEFESA", 2ª "EXÉRCITO BRASILEIRO", 3ª a OM expedidora e,
+ *  se houver, a numeração/denominação histórica — tudo em letras maiúsculas (por isso o
+ *  .toUpperCase() abaixo, que blinda o resultado mesmo que o usuário digite em minúsculas na
+ *  Subordinação). */
+export function cabecalho(s: Sindicancia) {
+  const linhasSubordinacao = (s.subordinacao || "Subordinação")
+    .split("\n")
+    .map((l) => l.trim().toUpperCase())
+    .filter(Boolean);
+  return ["MINISTÉRIO DA DEFESA", "EXÉRCITO BRASILEIRO", ...linhasSubordinacao, ""].join("\n");
+}
+
+/** Sub-cabeçalho (NUP + Portaria) repetido em cada peça extraída para documento próprio.
+ *  Usa-se sempre "nº" (não "nr") para "número" de Portaria/Ofício — art. 60 da
+ *  EB10-IG-01.001 (item 9 do bloco de comentários acima), padrão também observado nos
+ *  autos de sindicância já produzidos por esta OM. */
+function subcabecalhoProcesso(s: Sindicancia) {
+  return [
+    `SINDICÂNCIA — NUP/NUD ${s.nup || "____________"}`,
+    `Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}`,
+    linha,
+    "",
+  ].join("\n");
+}
+
+/** A função/cargo (última linha) fica SEM negrito; o nome (penúltima) vem em negrito —
+ *  ver requestsAssinatura em google.server.ts, que aplica o negrito na linha certa
+ *  (art. 57, II). As 3 linhas em branco abaixo dão o espaçamento mínimo pedido pelo
+ *  art. 57 antes da assinatura ("mínimo de 3 espaços simples ou 24 Pt"). */
+function assinatura(s: Sindicancia) {
+  return [
+    "",
+    "",
+    "",
+    (s.sindicante || "Posto/Grad e Nome de Guerra").toUpperCase(),
+    "Sindicante",
+    "",
+  ].join("\n");
+}
+
+export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
+  const local = c.local || s.local || "____________";
+  // Oitivas (inquirição/depoimento) usam o local específico dos trabalhos quando preenchido.
+  const localOitiva = c.local || s.localTrabalhos || s.local || "____________";
+  const head = cabecalho(s);
+
+  if (peca === "autos") {
+    return [
+      head.replace(/\n+$/, ""),
+      ...ESPACO_ANTES_TITULO,
+      "AUTOS DE SINDICÂNCIA",
+      "",
+      "",
+      "",
+      `NUP: ${s.nup || "____________"}`,
+      "",
+      `SINDICANTE: ${s.sindicante || "____________"}`,
+      "",
+      `SINDICADO: ${s.sindicado || "____________"}`,
+      "",
+      `OBJETO: ${s.objeto || "____________"}`,
+      "",
+    ].join("\n");
   }
 
-  return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">
-      <header className="min-w-0">
-        <h1 className="font-serif text-2xl font-semibold">Gerador Dinâmico de Peças</h1>
-        <p className="text-sm text-muted-foreground">
-          Textos pré-formatados conforme as normas de redação oficial EB10-IG-01.001.
-        </p>
-      </header>
+  const corpo = (() => {
+    switch (peca) {
+      case "abertura": {
+        const dataTxt = c.data ? dataPorExtenso(c.data) : "“data por extenso”";
+        const localTxt = c.local || s.local || "“local adicionado na base de dados”";
+        const omTxt = s.om || "“OM adicionada na base de dados”";
+        const portariaTxt = s.portariaNumero || "“Portaria adicionada na base”";
+        const autoridadeTxt = s.autoridade || "“Autoridade Instauradora da base de dados”";
+        const omInstTxt =
+          s.omInstauradora || s.om || "“OM Instauradora adicionada na base de dados”";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "TERMO DE ABERTURA",
+          "",
+          `Aos ${dataTxt} nesta cidade de ${localTxt}, no quartel do ${omTxt}, em cumprimento ao determinado na Portaria nº ${portariaTxt}, do Sr ${autoridadeTxt}, Comandante do ${omInstTxt}, faço a abertura dos trabalhos atinentes a presente sindicância, do que, para constar, lavrei o presente termo.`,
+        ].join("\n");
+      }
 
-      <div className="grid gap-4 lg:grid-cols-[240px_320px_1fr]">
-        <GuiaDocumento
-          documentos={selecionada.documentos ?? []}
-          autosUrl={selecionada.autosUrl}
-          pecaSelecionada={peca}
-          onSelecionarPeca={setPeca}
-        />
+      case "despacho-inicial": {
+        const sindicadoTxt = s.sindicado || "“sindicado adicionado na base de dados”";
+        const portariaTxt = s.portariaNumero || "“Portaria adicionada na base”";
+        const dataPortariaTxt = s.portariaData ? dataExtenso(s.portariaData) : "“data da portaria”";
+        const autoridadeTxt = s.autoridade || "“Autoridade Instauradora da base de dados”";
+        const omTxt = s.om || "“OM adicionada na base de dados”";
+        const dataOitivaTxt = c.data ? dataExtenso(c.data) : "“data designada”";
+        const horaTxt = c.hora || "__:__";
+        const localOitivaTxt = s.localTrabalhos || "“local dos trabalhos”";
+        const fechamentoData = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "DESPACHO",
+          "",
+          `Oficiar ao(à) ${sindicadoTxt}, sindicado, notificando previamente sobre a instauração da sindicância referente à Portaria nº ${portariaTxt}, de ${dataPortariaTxt}, do Sr ${autoridadeTxt}, Comandante do ${omTxt}.`,
+          "",
+          `Oficiar ao Sr. Comandante da “subunidade do sindicado”, com a finalidade de autorizar o comparecimento do ${sindicadoTxt}, com a finalidade de ser inquirido como sindicado.`,
+          "",
+          `Oficiar ao Chefe da “seção competente”, com a finalidade de solicitar “documento necessário”.`,
+          "",
+          `Designo o dia ${dataOitivaTxt}, às ${horaTxt} horas, a fim de ser ouvido o sindicado ${sindicadoTxt}, em ${localOitivaTxt}.`,
+          "",
+          "",
+          `Quartel em ${s.local || "____________"}, ${fechamentoData}.`,
+        ].join("\n");
+      }
 
-        <div className="painel space-y-4 p-4">
-          <div className="space-y-1.5">
-            <Label>Sindicância</Label>
-            <Select value={selecionada.id} onValueChange={setSelecionadaId}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {itens.map((i) => (
-                  <SelectItem key={i.id} value={i.id}>
-                    {i.nup || i.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      case "despacho-diversos": {
+        const fechamentoData = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        return [
+          ...ESPACO_ANTES_TITULO,
+          "DESPACHO",
+          "",
+          c.justificativa || "“conteúdo do despacho”",
+          "",
+          "",
+          `Quartel em ${s.local || "____________"}, ${fechamentoData}.`,
+        ].join("\n");
+      }
 
-          <div className="space-y-1.5">
-            <Label>Peça</Label>
-            <Select value={peca} onValueChange={(v) => setPeca(v as PecaId)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PECAS.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      case "notificacao":
+        return [
+          subcabecalhoProcesso(s),
+          "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
+          "",
+          `Notifico V. S.ª, ${s.sindicado || "Posto/Grad e Nome de Guerra do sindicado"}, ${c.qualificacao || "qualificação"}, de que responde à presente Sindicância, instaurada pela Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, tendo por objeto ${s.objeto || "os fatos nela descritos"}.`,
+          "",
+          "Fica assegurado o direito ao contraditório e à ampla defesa, podendo acompanhar todos os atos do procedimento, pessoalmente ou por procurador, arrolar testemunhas, requerer diligências e produzir provas em direito admitidas.",
+          "",
+          `Deverá comparecer no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, a fim de ser ouvido em declarações.`,
+        ].join("\n");
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-            <div className="space-y-1.5">
-              <Label>Local</Label>
-              <Input value={campos.local} onChange={(e) => set("local", e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Data do ato</Label>
-              <Input
-                type="date"
-                value={campos.data}
-                onChange={(e) => set("data", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Hora</Label>
-              <Input
-                type="time"
-                value={campos.hora}
-                onChange={(e) => set("hora", e.target.value)}
-              />
-            </div>
+      case "inquiricao":
+        return [
+          subcabecalhoProcesso(s),
+          "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
+          "",
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${localOitiva}, presente o Sindicante, compareceu ${c.destinatario || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de testemunha, advertido(a) das penas cominadas ao falso testemunho, prometeu dizer a verdade do que soubesse e lhe fosse perguntado.`,
+          "",
+          "PERGUNTAS FORMULADAS:",
+          c.perguntas || "1) ...",
+          "",
+          "RESPOSTAS:",
+          c.respostas || "1) ...",
+          "",
+          "Nada mais havendo, encerrou-se o presente termo, lido e achado conforme, que vai assinado pelo Sindicante e pelo(a) depoente.",
+          "",
+          "",
+          "____________________________________",
+          "Depoente",
+        ].join("\n");
 
-            {peca === "oficio" && (
-              <div className="space-y-1.5">
-                <Label>Número do Ofício</Label>
-                <Input
-                  value={campos.numeroOficio}
-                  onChange={(e) => set("numeroOficio", e.target.value)}
-                  placeholder="Sugerido automaticamente; ajuste se necessário"
-                />
-              </div>
-            )}
+      case "depoimento":
+        return [
+          subcabecalhoProcesso(s),
+          "TERMO DE DECLARAÇÕES DO SINDICADO",
+          "",
+          `Aos ${dataPorExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${localOitiva}, presente o Sindicante, compareceu ${s.sindicado || "Posto/Grad e Nome de Guerra"}, ${c.qualificacao || "qualificação"}, na condição de sindicado, cientificado do direito ao silêncio, ao contraditório e à ampla defesa, respondeu:`,
+          "",
+          "PERGUNTAS FORMULADAS:",
+          c.perguntas || "1) ...",
+          "",
+          "RESPOSTAS:",
+          c.respostas || "1) ...",
+          "",
+          "Nada mais havendo, encerrou-se o presente termo, lido e achado conforme.",
+          "",
+          "",
+          "____________________________________",
+          "Sindicado",
+        ].join("\n");
 
-            {peca === "diex" && (
-              <>
-                <div className="space-y-1.5">
-                  <Label>Número do DIEx</Label>
-                  <Input
-                    value={campos.numeroDiex}
-                    onChange={(e) => set("numeroDiex", e.target.value)}
-                    placeholder="Sugerido automaticamente; ajuste se necessário"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Ao (destinatário)</Label>
-                  <Input
-                    value={campos.destinatario}
-                    onChange={(e) => set("destinatario", e.target.value)}
-                    placeholder="Ex.: Sr Chefe da 3ª Seção"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Assunto</Label>
-                  <Input
-                    value={campos.assunto}
-                    onChange={(e) => set("assunto", e.target.value)}
-                    placeholder="Ex.: solicitação de documento"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Referência (opcional)</Label>
-                  <Input
-                    value={campos.referencia}
-                    onChange={(e) => set("referencia", e.target.value)}
-                    placeholder="Ex.: Portaria nº 66-Asse Ap As Jurd, de 14 de outubro de 2025"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Anexos (opcional)</Label>
-                  <Input
-                    value={campos.documentos}
-                    onChange={(e) => set("documentos", e.target.value)}
-                    placeholder="Ex.: cópia da Portaria nº 66..."
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Corpo do DIEx (itens numerados)</Label>
-                  <Textarea
-                    className="min-h-32"
-                    value={campos.justificativa}
-                    onChange={(e) => set("justificativa", e.target.value)}
-                    placeholder={"1. Solicito-vos...\n\n2. ..."}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Rodapé</Label>
-                  <Select
-                    value={campos.rodapeDiex}
-                    onValueChange={(v) => set("rodapeDiex", v as PecaCampos["rodapeDiex"])}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {RODAPE_DIEX_OPCOES.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            )}
+      case "oficio":
+        return [
+          subcabecalhoProcesso(s),
+          "OFÍCIO",
+          "",
+          `Ofício nº ${c.numeroOficio || "____"} - Sind ${s.nup || ""}`,
+          "",
+          `Ao Senhor ${c.destinatario || "Posto/Grad e Nome de Guerra / Autoridade"}`,
+          `${c.qualificacao || "Função / Endereço"}`,
+          "",
+          "Assunto: Intimação para comparecimento",
+          "",
+          `1. Na condição de Sindicante da Sindicância instaurada pela Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, solicito a V. S.ª as providências necessárias ao comparecimento no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}.`,
+          "",
+          `2. ${c.justificativa || "A medida destina-se à instrução do procedimento, nos termos da EB10-IG-09.001."}`,
+          "",
+          "3. Coloco-me à disposição para os esclarecimentos que se fizerem necessários.",
+        ].join("\n");
 
-            {peca === "diex-notificacao" && (
-              <>
-                <p className="text-xs text-muted-foreground sm:col-span-2 lg:col-span-1">
-                  Sempre gerado como DIEx Nº {RESERVA_DIEX_NOTIFICACAO} (reservado), endereçado ao
-                  sindicado cadastrado, com Assunto, Anexos e rodapé de ciência preenchidos
-                  automaticamente a partir dos dados da Portaria já lançados nesta sindicância.
-                </p>
-                <div className="space-y-1.5">
-                  <Label>Data da audiência/inquirição</Label>
-                  <Input
-                    type="date"
-                    value={campos.dataAudiencia}
-                    onChange={(e) => set("dataAudiencia", e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Distinta da "Data do ato" acima, que é a data de expedição deste DIEx.
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Direito assegurado ao sindicado</Label>
-                  <Input
-                    value={campos.finalidadeNotificacao}
-                    onChange={(e) => set("finalidadeNotificacao", e.target.value)}
-                    placeholder="Ex.: auxílio-transporte, conforme Portaria nº 2.394/2024"
-                  />
-                </div>
-              </>
-            )}
+      case "encerramento":
+        return [
+          subcabecalhoProcesso(s),
+          "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
+          "",
+          `Aos ${dataPorExtenso(c.data)}, nesta cidade de ${local}, o Sindicante declara encerrada a fase instrutória do procedimento instaurado pela Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, havendo sido produzidas todas as provas reputadas necessárias ao esclarecimento dos fatos.`,
+          "",
+          `${c.justificativa || "Não subsistem diligências pendentes."}`,
+          "",
+          "Determino a notificação do sindicado para apresentação de alegações finais, nos termos da EB10-IG-09.001.",
+        ].join("\n");
 
-            {(peca === "inquiricao" || peca === "oficio") && (
-              <div className="space-y-1.5">
-                <Label>Destinatário / Testemunha</Label>
-                <Input
-                  value={campos.destinatario}
-                  onChange={(e) => set("destinatario", e.target.value)}
-                />
-              </div>
-            )}
+      case "alegacoes":
+        return [
+          subcabecalhoProcesso(s),
+          "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
+          "",
+          `Notifico V. S.ª, ${s.sindicado || "Posto/Grad e Nome de Guerra"}, do encerramento da instrução da Sindicância instaurada pela Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}.`,
+          "",
+          `Fica facultada a apresentação de ALEGAÇÕES FINAIS, por escrito, no prazo de ${c.prazoDias || "5"} (____) dias, contados do recebimento desta, franqueada vista dos autos.`,
+          "",
+          "O silêncio não implicará confissão, prosseguindo o feito em seus ulteriores termos.",
+        ].join("\n");
 
-            {["inquiricao", "depoimento", "notificacao", "oficio"].includes(peca) && (
-              <div className="space-y-1.5">
-                <Label>Qualificação / Função</Label>
-                <Input
-                  value={campos.qualificacao}
-                  onChange={(e) => set("qualificacao", e.target.value)}
-                />
-              </div>
-            )}
+      case "prorrogacao":
+        return [
+          subcabecalhoProcesso(s),
+          "PEDIDO DE PRORROGAÇÃO DE PRAZO",
+          "",
+          `Ao(À) ${s.autoridade || "Autoridade Instauradora"}, Comandante do ${s.omInstauradora || s.om || "OM Instauradora"}`,
+          "",
+          `1. Solicito a prorrogação do prazo para conclusão da Sindicância instaurada pela Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, por mais ${c.prazoDias || "20"} (____) dias corridos.`,
+          "",
+          `2. Justificativa: ${c.justificativa || "necessidade de realização de diligências imprescindíveis à elucidação dos fatos, ainda pendentes de conclusão."}`,
+          "",
+          "3. O pedido encontra amparo na Portaria C Ex nº 2.394/2024 (EB10-IG-09.001).",
+          "",
+          "4. Nestes termos, peço deferimento.",
+        ].join("\n");
 
-            {(peca === "inquiricao" || peca === "depoimento") && (
-              <>
-                <div className="space-y-1.5">
-                  <Label>Perguntas</Label>
-                  <Textarea
-                    className="min-h-28"
-                    value={campos.perguntas}
-                    onChange={(e) => set("perguntas", e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Respostas</Label>
-                  <Textarea
-                    className="min-h-28"
-                    value={campos.respostas}
-                    onChange={(e) => set("respostas", e.target.value)}
-                  />
-                </div>
-              </>
-            )}
+      default:
+        return "";
+    }
+  })();
 
-            {["oficio", "encerramento", "prorrogacao"].includes(peca) && (
-              <div className="space-y-1.5">
-                <Label>Justificativa / Finalidade</Label>
-                <Textarea
-                  className="min-h-24"
-                  value={campos.justificativa}
-                  onChange={(e) => set("justificativa", e.target.value)}
-                />
-              </div>
-            )}
+  return `${head}${corpo}\n${assinatura(s)}`;
+}
 
-            {(peca === "alegacoes" || peca === "prorrogacao") && (
-              <div className="space-y-1.5">
-                <Label>Prazo (dias)</Label>
-                <Input
-                  value={campos.prazoDias}
-                  onChange={(e) => set("prazoDias", e.target.value)}
-                  inputMode="numeric"
-                />
-              </div>
-            )}
-          </div>
-        </div>
+/**
+ * Gera o texto de uma juntada específica (com numeração própria, ex.: "JUNTADA Nº 2"),
+ * listando os anexos já enviados. Segue a mesma convenção de formatação-base das demais
+ * peças; as fotos/PDFs em si são incorporados depois, sobre o Google Doc já criado — ver
+ * inserirAnexosNaJuntada em google.server.ts.
+ */
+export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
+  const titulo = `JUNTADA Nº ${j.numero}`;
+  const listaAnexos = j.anexos.length
+    ? j.anexos.map((a, i) => `${i + 1}. ${a.descricao}`).join("\n\n")
+    : "(nenhum item juntado até o momento)";
 
-        <div className="painel p-4">
-          <EditorPeca
-            titulo={`${nome} — ${selecionada.nup || selecionada.id}`}
-            conteudo={texto}
-            sindicanciaId={selecionada.id}
-            pecasExistentes={selecionada.documentos ?? []}
-            pecaId={peca}
-            unica={unica}
-            etapa={etapa}
-            onChange={setTexto}
-            onExportado={recarregar}
-          />
-        </div>
-      </div>
-    </div>
-  );
+  const corpo = [
+    ...ESPACO_ANTES_TITULO,
+    titulo,
+    "",
+    `Aos ${dataPorExtenso(j.data)}, nesta cidade de ${s.local || "____________"}, no quartel do ${s.om || "OM"}, faço a juntada aos autos da presente sindicância dos documentos a seguir especificados, do que, para constar, lavrei o presente termo.`,
+    "",
+    listaAnexos,
+  ].join("\n");
+
+  return `${cabecalho(s)}${corpo}\n${assinatura(s)}`;
+}
+
+/**
+ * Um registro da tabela "Dados_Sindicado" — uma sindicância pode ter vários (um por
+ * sindicado). Vínculo com a sindicância é pelo id (não pelo NUP). `linha` é a posição na
+ * planilha, preenchida pelo servidor; ausente/undefined significa "ainda não salvo".
+ */
+export type DadoSindicado = {
+  linha?: number;
+  sindicanciaId: string;
+  /** Select inicial — dele depende quais campos abaixo fazem sentido mostrar. */
+  civil: "Militar" | "Civil" | "";
+  /** Identidade (RG civil ou identidade militar). */
+  idt: string;
+  cpf: string;
+  nascimento: string;
+  naturalidade: string;
+  estadoCivil: string;
+  filiacao: string;
+  mae: string;
+  /** Inclui o CEP digitado junto ao restante do endereço. */
+  enderecoCompleto: string;
+  /** Só faz sentido se militar. */
+  companhia: string;
+  /** Só faz sentido se civil. */
+  vocativo: string;
+};
+
+/** Opções fixas de estado civil. */
+export const ESTADO_CIVIL_OPCOES = ["Solteiro", "Casado", "Divorciado", "Viúvo"] as const;
+
+/** Formata dígitos de CPF no padrão oficial 000.000.000-00 conforme o usuário digita. */
+export function formatarCPF(valor: string): string {
+  const digitos = valor.replace(/\D/g, "").slice(0, 11);
+  if (digitos.length > 9) {
+    return `${digitos.slice(0, 3)}.${digitos.slice(3, 6)}.${digitos.slice(6, 9)}-${digitos.slice(9)}`;
+  }
+  if (digitos.length > 6) {
+    return `${digitos.slice(0, 3)}.${digitos.slice(3, 6)}.${digitos.slice(6)}`;
+  }
+  if (digitos.length > 3) {
+    return `${digitos.slice(0, 3)}.${digitos.slice(3)}`;
+  }
+  return digitos;
+}
+
+/**
+ * Monta o parágrafo de qualificação do sindicado a partir de um DadoSindicado — civil e
+ * militar têm textos ligeiramente diferentes (vocativo só entra no civil; unidade/companhia
+ * só entra no militar). Pronta para ser usada no Termo de Depoimento, Ofícios, Diex e no
+ * Relatório Final.
+ */
+export function gerarQualificacaoSindicado(d: DadoSindicado): string {
+  const nascimentoTxt = d.nascimento ? dataExtenso(d.nascimento) : "“data de nascimento”";
+  const idtTxt = d.idt || "“identidade”";
+  const cpfTxt = d.cpf || "“CPF”";
+  const naturalidadeTxt = d.naturalidade || "“naturalidade”";
+  const estadoCivilTxt = d.estadoCivil || "“estado civil”";
+  const filiacaoTxt = d.filiacao || "“filiação”";
+  const maeTxt = d.mae || "“mãe”";
+  const enderecoTxt = d.enderecoCompleto || "“endereço”";
+
+  if (d.civil === "Militar") {
+    const companhiaTxt = d.companhia || "“companhia/unidade”";
+    return `portador(a) da identidade militar nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, servindo na ${companhiaTxt}, residente em ${enderecoTxt}`;
+  }
+
+  const vocativoTxt = d.vocativo || "Senhor(a)";
+  return `${vocativoTxt}, portador(a) da carteira de identidade nº ${idtTxt}, CPF nº ${cpfTxt}, nascido(a) em ${nascimentoTxt}, natural de ${naturalidadeTxt}, ${estadoCivilTxt}, filho(a) de ${filiacaoTxt} e de ${maeTxt}, residente em ${enderecoTxt}`;
+}
+
+export type Relatorio = {
+  introducao: string;
+  diligencias: string;
+  analise: string;
+  conclusao: string;
+};
+
+export function gerarRelatorio(s: Sindicancia, r: Relatorio, local: string, data: string) {
+  return [
+    cabecalho(s),
+    subcabecalhoProcesso(s),
+    "RELATÓRIO DO SINDICANTE",
+    "",
+    "1. INTRODUÇÃO",
+    r.introducao ||
+      `A presente Sindicância foi instaurada pela Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, da lavra do(a) ${s.autoridade || "Autoridade Instauradora"}, a fim de apurar ${s.objeto || "os fatos nela descritos"}.`,
+    "",
+    "2. DILIGÊNCIAS REALIZADAS",
+    r.diligencias || "a) ...",
+    "",
+    "3. ANÁLISE DOS FATOS",
+    r.analise || "...",
+    "",
+    "4. CONCLUSÃO",
+    r.conclusao || "...",
+    "",
+    `${local || s.local || "________________"}, ${dataExtenso(data)}.`,
+    assinatura(s),
+  ].join("\n");
 }
