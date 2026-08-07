@@ -1089,7 +1089,7 @@ export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?:
 async function garantirCarimboFixo(documentId: string) {
   try {
     const doc = await gw<{
-      headers?: Record
+      headers?: Record<
         string,
         { content?: { paragraph?: { elements?: { inlineObjectElement?: unknown }[] } }[] }
       >;
