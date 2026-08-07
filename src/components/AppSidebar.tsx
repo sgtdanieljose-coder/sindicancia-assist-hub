@@ -70,7 +70,7 @@ export function AppSidebar() {
 
         {!collapsed && (
           <div className="px-3 pb-4 text-[11px] leading-relaxed text-muted-foreground">
-            Portaria C Ex nr 2.394/2024 (EB10-IG-09.001) · Redação oficial EB10-IG-01.001
+            Portaria C Ex nº 2.394/2024 (EB10-IG-09.001) · Redação oficial EB10-IG-01.001
           </div>
         )}
       </SidebarContent>
