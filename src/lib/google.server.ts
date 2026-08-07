@@ -386,10 +386,174 @@ export async function ensureSindicanciaFolders(nup: string) {
   };
 }
 
-/** Monta (sem chamar a API) as requests que inserem o brasão da República centralizado a
- *  partir de um índice — reaproveitada tanto por inserirBrasao (chamada isolada) quanto pelo
- *  laço de rebuildAutos, que a agrupa na MESMA chamada da quebra de página (ver ali) para
- *  economizar uma rodada de rede por peça. */
+// ====================================================================================
+// FORMATAÇÃO OBRIGATÓRIA — EB10-IG-01.001 (Instruções Gerais para a Correspondência do
+// Exército, arts. 22 a 62 e Anexo, folhas 7 a 76). Estes parâmetros (margens, fonte,
+// recuo, espaçamento) são aplicados via API do Google Docs a QUALQUER documento criado
+// por este módulo — tanto o documento individual de cada peça (createDoc/
+// updateDocContent) quanto o documento único dos autos (ensureAutosDoc/rebuildAutos) —
+// para que toda peça gerada pelo app já nasça dentro do padrão gráfico oficial, sem
+// depender de ajuste manual no Google Docs.
+//
+// Referências rápidas usadas neste arquivo:
+//   Art. 24  — timbre (brasão a 1 cm do topo, texto em negrito) e fonte do timbre.
+//   Art. 25  — margens da folha.
+//   Art. 26  — fonte (Times New Roman 12 no texto / 10 no rodapé).
+//   Art. 27  — recuo de primeira linha dos parágrafos (4,5 a 5 cm da margem
+//              esquerda, ou seja, 1,5 a 2 cm ALÉM da margem de 3 cm).
+//   Art. 28  — espaçamento simples entre linhas.
+//   Art. 33  — rótulos da epígrafe/ementa (Assunto, Referência(s), Anexo(s)) em negrito.
+//   Art. 44  — identificação no rodapé de toda página (inclusive as de continuação,
+//              quando a peça ultrapassa uma folha).
+//   Art. 45  — evitar assinatura isolada em página própria.
+//   Art. 57  — assinatura: nome em negrito (1ª linha) e cargo/função sem negrito
+//              (2ª linha), ambas centralizadas, sem traço horizontal.
+// ====================================================================================
+
+/** 1 cm convertido para pontos (unidade aceita pela API do Google Docs: 1 pol = 72 pt). */
+const CM_EM_PT = 28.3465;
+
+/** Art. 25 — margens da folha. */
+const MARGEM_SUPERIOR_PT = 1 * CM_EM_PT; // I   - 1,0 cm
+const MARGEM_INFERIOR_PT = 2 * CM_EM_PT; // II  - mínimo 2,0 cm
+const MARGEM_ESQUERDA_PT = 3 * CM_EM_PT; // III - 3,0 cm
+const MARGEM_DIREITA_PT = 1.5 * CM_EM_PT; // IV  - 1,5 cm
+
+/** Art. 26 — Times New Roman: 12 no texto corrente, 10 nas notas de rodapé/identificação. */
+const FONTE_NOME = "Times New Roman";
+const FONTE_TAMANHO_TEXTO = 12;
+const FONTE_TAMANHO_RODAPE = 10;
+
+/**
+ * Art. 27 — "o início do texto será entre 4,5 a 5 cm de distância da margem
+ * esquerda": como a margem esquerda já é de 3 cm (art. 25, III), o recuo de
+ * primeira linha soma 1,5 a 2 cm a mais. Usa-se aqui o piso da faixa (1,5 cm) —
+ * troque por até 2 cm (56,69 pt) se preferir o teto.
+ */
+const RECUO_PRIMEIRA_LINHA_PT = 1.5 * CM_EM_PT;
+
+/** Requests que aplicam as margens da folha (art. 25) a um documento. Confirmado contra a
+ *  API (DocumentStyle.marginTop/marginBottom/marginLeft/marginRight, unit "PT"). */
+function requestsMargens(): unknown[] {
+  return [
+    {
+      updateDocumentStyle: {
+        documentStyle: {
+          marginTop: { magnitude: MARGEM_SUPERIOR_PT, unit: "PT" },
+          marginBottom: { magnitude: MARGEM_INFERIOR_PT, unit: "PT" },
+          marginLeft: { magnitude: MARGEM_ESQUERDA_PT, unit: "PT" },
+          marginRight: { magnitude: MARGEM_DIREITA_PT, unit: "PT" },
+        },
+        fields: "marginTop,marginBottom,marginLeft,marginRight",
+      },
+    },
+  ];
+}
+
+/** Art. 26/28 — Times New Roman 12 + espaçamento simples (lineSpacing 100 = 100%),
+ *  aplicados a um intervalo de texto (índices [startIndex, endIndex)) já inserido. */
+function requestsFontePadrao(startIndex: number, endIndex: number): unknown[] {
+  if (endIndex <= startIndex) return [];
+  return [
+    {
+      updateTextStyle: {
+        range: { startIndex, endIndex },
+        textStyle: {
+          weightedFontFamily: { fontFamily: FONTE_NOME },
+          fontSize: { magnitude: FONTE_TAMANHO_TEXTO, unit: "PT" },
+        },
+        fields: "weightedFontFamily,fontSize",
+      },
+    },
+    {
+      updateParagraphStyle: {
+        range: { startIndex, endIndex },
+        paragraphStyle: { lineSpacing: 100 },
+        fields: "lineSpacing",
+      },
+    },
+  ];
+}
+
+/**
+ * Art. 44 — toda peça deve trazer, no rodapé de TODAS as páginas (inclusive as de
+ * continuação, quando o texto ultrapassa uma folha), uma identificação centralizada
+ * a pelo menos 1 cm da borda inferior, no padrão "(Tipo nº X – Seção/OM, de DATA –
+ * NUP ... N/T)".
+ *
+ * LIMITAÇÃO CONHECIDA: a API do Google Docs (batchUpdate) não expõe nenhum recurso
+ * para inserir um campo automático de número de página / total de páginas — isso só
+ * existe pela interface (Inserir > Números de página). Por isso este rodapé traz
+ * apenas a identificação do documento (o parâmetro `identificacao`, normalmente o
+ * título da peça já com o NUP embutido) e fica sem o "N/T". Duas saídas possíveis
+ * para quem precisar do "N/T" completo: (a) inserir manualmente pelo Google Docs, ou
+ * (b) usar a numeração "Fls. N" já aplicada por peça no documento único dos autos
+ * (ver rebuildAutos), que cumpre um papel equivalente para o dossiê consolidado.
+ * Roda só na CRIAÇÃO do documento (createDoc) — o título não muda depois disso.
+ */
+async function garantirRodapeIdentificacao(documentId: string, identificacao: string) {
+  try {
+    const doc = await gw<{ footers?: Record<string, unknown> }>(
+      "google_docs",
+      `/v1/documents/${documentId}`,
+      { query: { fields: "footers" } },
+    );
+
+    let footerId: string | undefined = Object.keys(doc.footers ?? {})[0];
+    if (!footerId) {
+      const criado = await gw<{ replies?: { createFooter?: { footerId?: string } }[] }>(
+        "google_docs",
+        `/v1/documents/${documentId}:batchUpdate`,
+        { method: "POST", body: { requests: [{ createFooter: { type: "DEFAULT" } }] } },
+      );
+      footerId = criado.replies?.[0]?.createFooter?.footerId;
+      if (!footerId) throw new Error("A API não devolveu o ID do rodapé criado.");
+    }
+
+    const texto = `(${identificacao})`;
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: {
+        requests: [
+          { insertText: { location: { index: 1, segmentId: footerId }, text: texto } },
+          {
+            updateTextStyle: {
+              range: { startIndex: 1, endIndex: 1 + texto.length, segmentId: footerId },
+              textStyle: {
+                weightedFontFamily: { fontFamily: FONTE_NOME },
+                fontSize: { magnitude: FONTE_TAMANHO_RODAPE, unit: "PT" },
+              },
+              fields: "weightedFontFamily,fontSize",
+            },
+          },
+          {
+            updateParagraphStyle: {
+              range: { startIndex: 1, endIndex: 1 + texto.length, segmentId: footerId },
+              paragraphStyle: { alignment: "CENTER" },
+              fields: "alignment",
+            },
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    console.warn("Não foi possível aplicar a identificação de rodapé (art. 44):", e);
+  }
+}
+
+/** Monta (sem chamar a API) as requests que inserem o brasão da República
+ *  centralizado a partir de um índice — reaproveitada tanto por inserirBrasao
+ *  (chamada isolada) quanto pelo laço de rebuildAutos, que a agrupa na MESMA
+ *  chamada da quebra de página (ver ali) para economizar uma rodada de rede por
+ *  peça.
+ *
+ *  Art. 24 — o timbre (do qual o brasão faz parte) fica "a um centímetro da borda
+ *  superior do papel": como o brasão é sempre o primeiro conteúdo inserido no
+ *  corpo do documento (índice 1) e a margem superior do documento é de 1 cm (ver
+ *  MARGEM_SUPERIOR_PT/requestsMargens), o brasão já nasce a 1 cm do topo da folha
+ *  sem precisar de ajuste extra aqui. O tamanho abaixo (altura 70 pt ≈ 2,47 cm)
+ *  respeita o limite de "no máximo dois vírgula cinco centímetros" na maior
+ *  dimensão. */
 function requestsBrasao(index: number): unknown[] {
   return [
     {
@@ -424,20 +588,36 @@ async function inserirBrasao(documentId: string, index = 1) {
   }
 }
 
-/** Cria um Google Doc com brasão + texto e devolve id/url. */
+/**
+ * Cria um Google Doc com brasão + texto e devolve id/url. O passo de inserção de
+ * conteúdo roda isolado e SEM try/catch (se falhar, precisa mesmo propagar o erro,
+ * já que sem ele a peça não existe); tudo que vem depois é formatação da
+ * EB10-IG-01.001 — margens (art. 25), fonte/espaçamento (arts. 26/28), brasão
+ * (art. 24) e identificação de rodapé (art. 44) — e roda best-effort, para nunca
+ * arriscar o conteúdo que já foi salvo.
+ */
 export async function createDoc(title: string, content: string, pastaId?: string) {
   const doc = await gw<{ documentId: string }>("google_docs", "/v1/documents", {
     method: "POST",
     body: { title },
   });
 
+  const texto = `\n${content}`;
   await gw("google_docs", `/v1/documents/${doc.documentId}:batchUpdate`, {
     method: "POST",
-    body: {
-      requests: [{ insertText: { location: { index: 1 }, text: `\n${content}` } }],
-    },
+    body: { requests: [{ insertText: { location: { index: 1 }, text: texto } }] },
   });
+
+  try {
+    await gw("google_docs", `/v1/documents/${doc.documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests: [...requestsMargens(), ...requestsFontePadrao(1, 1 + texto.length)] },
+    });
+  } catch (e) {
+    console.warn("Não foi possível aplicar margens/fonte da EB10-IG-01.001:", e);
+  }
   await inserirBrasao(doc.documentId, 1);
+  await garantirRodapeIdentificacao(doc.documentId, title);
 
   // Tenta arquivar na pasta da sindicância (ou na pasta geral, se ela ainda não tiver uma). Best-effort.
   try {
@@ -507,11 +687,15 @@ async function listarParagrafos(documentId: string): Promise<Paragrafo[]> {
 //   3) 4 linhas em branco entre o cabeçalho e o título da peça (ver ESPACO_ANTES_TITULO
 //      em pecas.ts, usado ao gerar o texto).
 //   4) Título da peça em negrito, sublinhado e centralizado.
-//   5) Corpo do texto (peças com um parágrafo narrativo) justificado, com recuo na
-//      primeira linha.
-//   6) Assinatura ao final: nome centralizado em peso normal, e a função/cargo
-//      (ex.: "Sindicante") centralizada e em negrito — sempre os dois últimos
-//      parágrafos não vazios, já que toda peça (exceto a Capa) termina com assinatura(s).
+//   5) Corpo do texto (peças com parágrafo narrativo) justificado, com recuo na
+//      primeira linha (art. 27 — ver RECUO_PRIMEIRA_LINHA_PT).
+//   6) Rótulos (Assunto/Referência(s)/Anexo(s), ou NUP/Sindicante/Sindicado/Objeto na
+//      capa) em negrito — art. 33.
+//   7) Assinatura ao final: nome centralizado E EM NEGRITO (1ª linha) e a
+//      função/cargo (ex.: "Sindicante") centralizada, SEM negrito (2ª linha) —
+//      sempre as duas últimas linhas não vazias (art. 57, II).
+//   8) O trecho final (última frase do corpo + assinatura) fica marcado para não
+//      ser separado por uma quebra de página (art. 45).
 //
 // Reconhecida pelo TEXTO já inserido (não por posição fixa), então sobrevive a ajustes
 // que o usuário faça na minuta antes de exportar.
@@ -538,17 +722,33 @@ const TITULOS_PECA: Partial<Record<string, string>> = {
   relatorio: "RELATÓRIO DO SINDICANTE",
 };
 
-const ROTULOS_CAPA = ["NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:"];
-
-/** Rótulos do cabeçalho de um DIEx (ver o case "diex" em pecas.ts) postos em negrito. Não
- *  inclui "Do "/"Ao " porque, ao contrário dos demais, esses prefixos não são seguidos de
- *  ":" e o valor começa colado ao rótulo (ex.: "Do 1º Sgt..."), o que tornaria o negrito
- *  visualmente confuso; os rótulos abaixo são sempre "RÓTULO: valor". */
-const ROTULOS_DIEX = ["EB:", "Assunto:", "Referência:", "Anexos:"];
+/**
+ * Rótulos que a EB10-IG-01.001 manda destacar em negrito:
+ *  - "NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:" — convenção própria da capa dos
+ *    autos deste sistema, no mesmo espírito do art. 33 (epígrafe/ementa);
+ *  - "Assunto:", "Referência(s):", "Anexo(s):" — art. 33, IV, e Anexo I.1 (item 2,
+ *    alínea "e") e Anexo II.2 (DIEx): assunto, referência e anexo vêm sempre em
+ *    negrito nos ofícios e documentos internos.
+ * Aplica-se em QUALQUER peça (não só na capa), mantendo o valor após os dois-pontos
+ * com peso normal.
+ */
+const ROTULOS_NEGRITO = [
+  "NUP:",
+  "SINDICANTE:",
+  "SINDICADO:",
+  "OBJETO:",
+  "Assunto:",
+  "Referência:",
+  "Referências:",
+  "Anexo:",
+  "Anexos:",
+];
 
 /** Cabeçalho (tudo antes do título) em negrito+centralizado; título em negrito+sublinhado+
  *  centralizado. Não faz nada se o título não for encontrado (evita negritar o documento
- *  inteiro por engano quando a peça ainda não tem uma convenção de título cadastrada). */
+ *  inteiro por engano quando a peça ainda não tem uma convenção de título cadastrada).
+ *  Arts. 24 (timbre em negrito) e 29 (uso comedido de negrito/sublinhado/caixa alta) —
+ *  por isso o negrito fica restrito ao cabeçalho e ao título, nunca ao corpo do texto. */
 function requestsCabecalhoTitulo(paragrafos: Paragrafo[], titulo: string): unknown[] {
   if (!paragrafos.some((p) => p.texto.replace(/\n$/, "").trim() === titulo)) return [];
 
@@ -605,7 +805,8 @@ function requestsCabecalhoTitulo(paragrafos: Paragrafo[], titulo: string): unkno
 }
 
 /** Parágrafos entre o título e os dois últimos (a assinatura) justificados, com recuo de
- *  primeira linha — o corpo narrativo da peça. */
+ *  primeira linha — o corpo narrativo da peça. Art. 27: recuo de 1,5 cm além da margem
+ *  esquerda de 3 cm (ver RECUO_PRIMEIRA_LINHA_PT). */
 function requestsCorpoJustificado(paragrafos: Paragrafo[], titulo: string): unknown[] {
   const naoVazios = paragrafos.filter((p) => p.texto.trim());
   const idxTitulo = naoVazios.findIndex((p) => p.texto.replace(/\n$/, "").trim() === titulo);
@@ -620,7 +821,7 @@ function requestsCorpoJustificado(paragrafos: Paragrafo[], titulo: string): unkn
           startIndex: naoVazios[i].startIndex,
           endIndex: naoVazios[i].startIndex + texto.length,
         },
-        paragraphStyle: { alignment: "JUSTIFIED", indentFirstLine: { magnitude: 36, unit: "PT" } },
+        paragraphStyle: { alignment: "JUSTIFIED", indentFirstLine: { magnitude: RECUO_PRIMEIRA_LINHA_PT, unit: "PT" } },
         fields: "alignment,indentFirstLine",
       },
     });
@@ -628,11 +829,13 @@ function requestsCorpoJustificado(paragrafos: Paragrafo[], titulo: string): unkn
   return requests;
 }
 
-/** Núcleo da formatação de assinatura (nome centralizado + função em negrito), aplicado aos
- *  2 últimos parágrafos não vazios de uma FATIA já delimitada por quem chama — ver
- *  requestsAssinatura (fatia = documento inteiro) e requestsAssinaturaDiex (fatia = tudo
- *  antes do rodapé de ciência/recebimento). */
-function requestsAssinaturaEm(naoVazios: Paragrafo[]): unknown[] {
+/** Assinatura final: sempre os dois últimos parágrafos não vazios. Art. 57, I e II:
+ *  sem traço horizontal, tudo centralizado; o NOME (1ª linha) vem em negrito e
+ *  maiúsculo, e o cargo/função (2ª linha, ex.: "Sindicante") vem centralizado mas SEM
+ *  negrito. (Antes desta correção o negrito estava trocado — na função, não no nome.)
+ *  Não usar na Capa, que não tem assinatura. */
+function requestsAssinatura(paragrafos: Paragrafo[]): unknown[] {
+  const naoVazios = paragrafos.filter((p) => p.texto.trim());
   if (naoVazios.length < 2) return [];
 
   const requests: unknown[] = [];
@@ -640,7 +843,7 @@ function requestsAssinaturaEm(naoVazios: Paragrafo[]): unknown[] {
     const texto = p.texto.replace(/\n$/, "");
     const inicio = p.startIndex;
     const fim = p.startIndex + texto.length;
-    const ehFuncao = i === 1;
+    const ehNome = i === 0;
     requests.push(
       {
         updateParagraphStyle: {
@@ -649,7 +852,7 @@ function requestsAssinaturaEm(naoVazios: Paragrafo[]): unknown[] {
           fields: "alignment",
         },
       },
-      ...(ehFuncao
+      ...(ehNome
         ? [
             {
               updateTextStyle: {
@@ -665,35 +868,45 @@ function requestsAssinaturaEm(naoVazios: Paragrafo[]): unknown[] {
   return requests;
 }
 
-/** Assinatura final: sempre os dois últimos parágrafos não vazios — nome centralizado (peso
- *  normal) e função/cargo (última linha) centralizada e em negrito. Não usar na Capa, que
- *  não tem assinatura. */
-function requestsAssinatura(paragrafos: Paragrafo[]): unknown[] {
-  return requestsAssinaturaEm(paragrafos.filter((p) => p.texto.trim()));
-}
-
-/** Marcadores literais que abrem o rodapé de um DIEx (ver gerarRodapeDiex em pecas.ts). */
-const MARCADORES_RODAPE_DIEX = ["Declaro que tenho ciência:", "Recebimento:"];
-
-/** Como requestsAssinatura, mas localizando a assinatura pelos 2 parágrafos que vêm ANTES do
- *  rodapé de ciência/recebimento — o DIEx é a única peça com conteúdo depois da assinatura,
- *  o que quebraria a convenção de "os 2 últimos parágrafos do documento" usada pelas demais. */
-function requestsAssinaturaDiex(paragrafos: Paragrafo[]): unknown[] {
+/**
+ * Art. 45 — "recomenda-se não deixar a assinatura em página isolada do expediente,
+ * devendo-se transferir para essa página ao menos a última frase anterior ao
+ * fecho". Encadeia `keepWithNext` (campo confirmado no ParagraphStyle da API) do
+ * último parágrafo de corpo até o nome do signatário, passando pelas linhas em
+ * branco do meio — assim o Google Docs nunca quebra a página bem ali: a assinatura
+ * só migra para a página seguinte junto com aquela última frase, nunca sozinha.
+ */
+function requestsEvitarAssinaturaIsolada(paragrafos: Paragrafo[]): unknown[] {
   const naoVazios = paragrafos.filter((p) => p.texto.trim());
-  const idxRodape = naoVazios.findIndex((p) =>
-    MARCADORES_RODAPE_DIEX.includes(p.texto.replace(/\n$/, "").trim()),
-  );
-  return requestsAssinaturaEm(idxRodape >= 0 ? naoVazios.slice(0, idxRodape) : naoVazios);
+  if (naoVazios.length < 3) return [];
+  const ultimoCorpo = naoVazios[naoVazios.length - 3];
+  const nome = naoVazios[naoVazios.length - 2];
+  const idxUltimoCorpo = paragrafos.findIndex((p) => p.startIndex === ultimoCorpo.startIndex);
+  const idxNome = paragrafos.findIndex((p) => p.startIndex === nome.startIndex);
+  if (idxUltimoCorpo < 0 || idxNome < 0 || idxNome < idxUltimoCorpo) return [];
+
+  const requests: unknown[] = [];
+  for (let i = idxUltimoCorpo; i <= idxNome; i++) {
+    const p = paragrafos[i];
+    requests.push({
+      updateParagraphStyle: {
+        range: { startIndex: p.startIndex, endIndex: p.startIndex + 1 },
+        paragraphStyle: { keepWithNext: true },
+        fields: "keepWithNext",
+      },
+    });
+  }
+  return requests;
 }
 
-/** Rótulos (ex.: "NUP:", "Assunto:") em negrito no início da linha, mantendo o valor em
- *  texto normal — usado tanto na Capa dos Autos quanto no cabeçalho do DIEx. */
-function requestsRotulos(paragrafos: Paragrafo[], rotulos: string[]): unknown[] {
+/** Rótulos em negrito (ver ROTULOS_NEGRITO) — mantém o valor após os dois-pontos com
+ *  peso normal. Usada em QUALQUER peça, não só na capa dos autos. */
+function requestsRotulosNegrito(paragrafos: Paragrafo[]): unknown[] {
   const requests: unknown[] = [];
   for (const p of paragrafos) {
     const texto = p.texto.replace(/\n$/, "");
     const conteudo = texto.trim();
-    const rotulo = rotulos.find((r) => conteudo.startsWith(r));
+    const rotulo = ROTULOS_NEGRITO.find((r) => conteudo.startsWith(r));
     if (!rotulo) continue;
     const recuo = texto.length - texto.trimStart().length;
     const inicioRotulo = p.startIndex + recuo;
@@ -735,16 +948,18 @@ function gruposFormatacaoPeca(
       });
     }
   }
-  if (pecaId === "autos") {
-    grupos.push({ nome: "rótulos da capa", requests: requestsRotulos(paragrafos, ROTULOS_CAPA) });
-  } else if (pecaId === "diex" || pecaId === "diex-notificacao") {
-    // O DIEx (nas duas variantes) não tem um título centralizado (é um memorando, não um
-    // termo) — só os rótulos do cabeçalho em negrito e a assinatura localizada antes do
-    // rodapé de ciência/recebimento.
-    grupos.push({ nome: "rótulos do DIEx", requests: requestsRotulos(paragrafos, ROTULOS_DIEX) });
-    grupos.push({ nome: "assinatura", requests: requestsAssinaturaDiex(paragrafos) });
-  } else {
+
+  // Arts. 33/64/65 e Anexo — rótulos (NUP/Sindicante/Sindicado/Objeto na capa;
+  // Assunto/Referência(s)/Anexo(s) em ofícios e afins) sempre em negrito, em
+  // QUALQUER peça (antes só rodava na capa dos autos).
+  grupos.push({ nome: "rótulos em negrito", requests: requestsRotulosNegrito(paragrafos) });
+
+  if (pecaId !== "autos") {
     grupos.push({ nome: "assinatura", requests: requestsAssinatura(paragrafos) });
+    grupos.push({
+      nome: "evitar assinatura isolada",
+      requests: requestsEvitarAssinaturaIsolada(paragrafos),
+    });
   }
   return grupos.filter((g) => g.requests.length);
 }
@@ -777,6 +992,11 @@ export async function formatarPecaBasica(
   if (erros.length) throw new Error(erros.join(" | "));
 }
 
+/** Atualiza o texto de uma peça já existente. Assim como em createDoc, o passo de
+ *  substituir o conteúdo roda sem try/catch (é o essencial); margens/fonte/espaçamento
+ *  (arts. 25/26/28) rodam depois, isolados, best-effort — reaplicados a cada edição para
+ *  que peças criadas antes desta formatação também fiquem em conformidade assim que
+ *  forem editadas. */
 export async function updateDocContent(documentId: string, content: string) {
   const doc = await gw<{ body?: { content?: { endIndex?: number }[] } }>(
     "google_docs",
@@ -789,12 +1009,22 @@ export async function updateDocContent(documentId: string, content: string) {
   if (endIndex > 2) {
     requests.push({ deleteContentRange: { range: { startIndex: 1, endIndex: endIndex - 1 } } });
   }
-  requests.push({ insertText: { location: { index: 1 }, text: `\n${content}` } });
+  const texto = `\n${content}`;
+  requests.push({ insertText: { location: { index: 1 }, text: texto } });
 
   await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
     method: "POST",
     body: { requests },
   });
+
+  try {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests: [...requestsMargens(), ...requestsFontePadrao(1, 1 + texto.length)] },
+    });
+  } catch (e) {
+    console.warn("Não foi possível aplicar margens/fonte da EB10-IG-01.001:", e);
+  }
   await inserirBrasao(documentId, 1);
 
   return {
@@ -804,7 +1034,13 @@ export async function updateDocContent(documentId: string, content: string) {
   };
 }
 
-/** Cria (se necessário) o documento único dos autos e devolve seus dados. */
+/** Cria (se necessário) o documento único dos autos e devolve seus dados. Também aplica
+ *  as margens da EB10-IG-01.001 (art. 25) — a fonte/espaçamento (arts. 26/28) do texto em
+ *  si são aplicados em rebuildAutos, que é quem insere o conteúdo. Não recebe uma
+ *  identificação de rodapé própria (art. 44) porque o documento único já numera cada
+ *  peça com o marcador "Fls. N" (ver rebuildAutos), que cumpre papel equivalente para o
+ *  dossiê consolidado — cada peça repete seu próprio timbre e brasão, como nos
+ *  processos físicos reais. */
 export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?: string) {
   if (autosDocId && (await arquivoAtivo(autosDocId))) {
     return {
@@ -816,6 +1052,14 @@ export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?:
     method: "POST",
     body: { title: `AUTOS DE SINDICÂNCIA — ${nup || "sem NUP"}` },
   });
+  try {
+    await gw("google_docs", `/v1/documents/${doc.documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests: requestsMargens() },
+    });
+  } catch (e) {
+    console.warn("Não foi possível aplicar as margens da EB10-IG-01.001 aos autos:", e);
+  }
   try {
     await gw("google_drive", `/drive/v3/files/${doc.documentId}`, {
       method: "PATCH",
@@ -836,11 +1080,16 @@ export async function ensureAutosDoc(nup: string, autosDocId?: string, pastaId?:
  * direita. Cabeçalhos se repetem automaticamente em toda página e ficam na margem — não
  * disputam espaço com o texto/fotos do corpo, ao contrário de uma imagem solta no meio do
  * texto. Idempotente: não insere um segundo carimbo se o cabeçalho já tiver um.
+ *
+ * OBS.: este carimbo é uma convenção própria deste sistema (não é exigido pela
+ * EB10-IG-01.001) para facilitar a conferência visual das folhas nos autos consolidados;
+ * não confundir com a identificação de rodapé do art. 44, aplicada nas peças individuais
+ * por garantirRodapeIdentificacao.
  */
 async function garantirCarimboFixo(documentId: string) {
   try {
     const doc = await gw<{
-      headers?: Record<
+      headers?: Record
         string,
         { content?: { paragraph?: { elements?: { inlineObjectElement?: unknown }[] } }[] }
       >;
@@ -899,6 +1148,9 @@ async function garantirCarimboFixo(documentId: string) {
  * caractere de texto), com o brasão no início de cada uma, e reaplicando a MESMA formatação
  * usada no documento individual de cada peça — ver gruposFormatacaoPeca. O carimbo fica
  * fixo no cabeçalho de página (ver garantirCarimboFixo), não mais solto no meio do texto.
+ * Também aplica a fonte/espaçamento padrão (arts. 26/28) a todo o texto inserido e
+ * centraliza o marcador "Fls. N" em corpo reduzido (art. 44 — identificação de página
+ * centralizada), já que a API do Google Docs não numera páginas físicas automaticamente.
  */
 export async function rebuildAutos(
   documentId: string,
@@ -935,6 +1187,14 @@ export async function rebuildAutos(
     method: "POST",
     body: { requests: [{ insertText: { location: { index: 1 }, text: texto } }] },
   });
+  try {
+    await gw("google_docs", `/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      body: { requests: requestsFontePadrao(1, 1 + texto.length) },
+    });
+  } catch (e) {
+    console.warn("Não foi possível aplicar a fonte padrão (EB10-IG-01.001) aos autos:", e);
+  }
 
   // 3) Quebra de página de verdade (não caractere de texto) + brasão no início de cada peça —
   //    sempre em página própria. De trás para frente: como cada peça só mexe em índices a
@@ -977,11 +1237,20 @@ export async function rebuildAutos(
     const p = paragrafos[m.idx];
     gruposPorNome.set("marcador de folha", [
       ...(gruposPorNome.get("marcador de folha") ?? []),
+      // Art. 44 — identificação de página centralizada (aqui adaptada para numerar
+      // cada PEÇA dentro do consolidado, já que a API não numera páginas físicas).
       {
         updateParagraphStyle: {
           range: { startIndex: p.startIndex, endIndex: p.startIndex + m.texto.length },
-          paragraphStyle: { alignment: "END" },
+          paragraphStyle: { alignment: "CENTER" },
           fields: "alignment",
+        },
+      },
+      {
+        updateTextStyle: {
+          range: { startIndex: p.startIndex, endIndex: p.startIndex + m.texto.length },
+          textStyle: { fontSize: { magnitude: FONTE_TAMANHO_RODAPE, unit: "PT" } },
+          fields: "fontSize",
         },
       },
     ]);
@@ -1058,6 +1327,8 @@ export async function uploadAnexo(params: {
 /**
  * Insere, ao final de um documento (o "folha própria" de um item de juntada), a foto
  * incorporada (imagens) ou um link clicável para abrir o arquivo (PDFs e demais tipos).
+ * O texto do link também recebe a fonte padrão (art. 26), pela mesma lógica de
+ * requestsFontePadrao.
  */
 export async function inserirAnexoNoFimDoDocumento(
   documentId: string,
@@ -1084,8 +1355,12 @@ export async function inserirAnexoNoFimDoDocumento(
       {
         updateTextStyle: {
           range: { startIndex: fim, endIndex: fim + texto.length - 1 },
-          textStyle: { link: { url: anexo.url } },
-          fields: "link",
+          textStyle: {
+            link: { url: anexo.url },
+            weightedFontFamily: { fontFamily: FONTE_NOME },
+            fontSize: { magnitude: FONTE_TAMANHO_TEXTO, unit: "PT" },
+          },
+          fields: "link,weightedFontFamily,fontSize",
         },
       },
     );
