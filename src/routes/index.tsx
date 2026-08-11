@@ -292,7 +292,15 @@ function Dashboard() {
                   />
                 </div>
                 <Campo
-                  label="Organização Militar (OM)"
+                  <div className="space-y-1.5">
+                  <Label>Seção dos Atos</Label>
+                  <Input value={form.om} onChange={(e) => set("om", e.target.value)} />
+                  <p className="text-xs text-muted-foreground">
+                    Local/seção onde são feitas as inquirições — preenche automaticamente o
+                    "local dos trabalhos" do Despacho Inicial e da Notificação Prévia no Gerador
+                    de Peças.
+                  </p>
+                </div>
                   value={form.om}
                   onChange={(v) => set("om", v)}
                 />
