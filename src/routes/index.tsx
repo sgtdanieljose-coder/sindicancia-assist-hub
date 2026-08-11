@@ -291,8 +291,7 @@ function Dashboard() {
                     className="min-h-20 font-mono text-sm"
                   />
                 </div>
-                <Campo
-                  <div className="space-y-1.5">
+                <div className="space-y-1.5">
                   <Label>Seção dos Atos</Label>
                   <Input value={form.om} onChange={(e) => set("om", e.target.value)} />
                   <p className="text-xs text-muted-foreground">
@@ -301,9 +300,7 @@ function Dashboard() {
                     de Peças.
                   </p>
                 </div>
-                  value={form.om}
-                  onChange={(v) => set("om", v)}
-                />
+
                 <Campo
                   label="OM Instauradora"
                   value={form.omInstauradora}
