@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PECAS,
+  gerarDiligenciasRealizadas,
   gerarPeca,
   gerarRelatorio,
   gerarTextoJuntada,
@@ -27,6 +28,9 @@ import {
  *  6) Abreviatura "nº" (nunca "nr") para Portaria/Ofício — art. 60 da EB10-IG-01.001.
  *  7) Datas no formato "dia de mês de ano" sem zero à esquerda, exceto o dia 1º, que
  *     leva o indicativo ordinal "º" — art. 51, I e II, da EB10-IG-01.001.
+ *  8) Despacho Inicial e Notificação Prévia puxam a "Seção dos Atos" (campo `om`)
+ *     automaticamente como local dos trabalhos, e usam uma data de inquirição própria
+ *     (dataInquiricao), distinta da data da peça.
  */
 
 /** Espelho do TITULOS_PECA de google.server.ts (o título deve bater literalmente). */
@@ -36,9 +40,12 @@ const TITULOS_PECA: Record<PecaId, string> = {
   "despacho-inicial": "DESPACHO",
   "despacho-diversos": "DESPACHO",
   notificacao: "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
+  diex: "DIEX",
   inquiricao: "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
   depoimento: "TERMO DE DECLARAÇÕES DO SINDICADO",
+  acareacao: "TERMO DE ACAREAÇÃO",
   oficio: "OFÍCIO",
+  certidao: "CERTIDÃO",
   encerramento: "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
   alegacoes: "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
   prorrogacao: "PEDIDO DE PRORROGAÇÃO DE PRAZO",
@@ -49,7 +56,7 @@ const SINDICANCIA: Sindicancia = {
   nup: "64444.000123/2026-11",
   portariaNumero: "015",
   portariaData: "2026-03-10",
-  om: "63º Batalhão de Infantaria",
+  om: "Fiscalização Administrativa do 63º BI",
   autoridade: "Cel Inf SILVA",
   sindicante: "1º Ten Inf PEREIRA",
   sindicado: "Sd MARQUES",
@@ -85,29 +92,43 @@ const SINDICANCIA_VAZIA: Sindicancia = {
 const CAMPOS: PecaCampos = {
   local: "Florianópolis-SC",
   data: "2026-03-12",
+  dataInquiricao: "2026-03-20",
   hora: "14:30",
   destinatario: "Sgt ALMEIDA",
   qualificacao: "Sargento do 63º BI",
+  destinatario2: "Cb SOUZA",
+  qualificacao2: "Cabo do 63º BI",
   documentos: "Cópia da guia de material",
   perguntas: "1) Onde estava no dia dos fatos?",
   respostas: "1) No quartel.",
   justificativa: "necessidade de oitiva de testemunha residente em outra guarnição",
   prazoDias: "5",
   numeroOficio: "3",
+  numeroDiex: "004",
+  assunto: "solicitação de documento",
+  referencia: "Portaria nº 66-Asse Ap As Jurd, de 14 de outubro de 2025",
+  rodapeDiex: "recebimento",
 };
 
 const CAMPOS_VAZIOS: PecaCampos = {
   local: "",
   data: "",
+  dataInquiricao: "",
   hora: "",
   destinatario: "",
   qualificacao: "",
+  destinatario2: "",
+  qualificacao2: "",
   documentos: "",
   perguntas: "",
   respostas: "",
   justificativa: "",
   prazoDias: "",
   numeroOficio: "",
+  numeroDiex: "",
+  assunto: "",
+  referencia: "",
+  rodapeDiex: "recebimento",
 };
 
 const linhas = (t: string) => t.split("\n");
@@ -131,7 +152,7 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     const primeiras = naoVazias(texto).slice(0, 3);
     expect(primeiras[0]).toBe("MINISTÉRIO DA DEFESA");
     expect(primeiras[1]).toBe("EXÉRCITO BRASILEIRO");
-    expect(primeiras[2]).toBe(SINDICANCIA.subordinacao);
+    expect(primeiras[2]).toBe(SINDICANCIA.subordinacao.toUpperCase());
   });
 
   it.each(ids)("%s: título literal em caixa alta, em linha própria", (id) => {
@@ -146,9 +167,12 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
   // cabeçalho institucional e o título; as demais usam o espaçamento padrão de 4 linhas.
   const COM_SUBCABECALHO: PecaId[] = [
     "notificacao",
+    "diex",
     "inquiricao",
     "depoimento",
+    "acareacao",
     "oficio",
+    "certidao",
     "encerramento",
     "alegacoes",
     "prorrogacao",
@@ -177,7 +201,6 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     expect(antes).toMatch(/_{10,}/); // filete separador
     expect(ls[i - 1]?.trim()).toBe(""); // linha em branco imediatamente antes do título
   });
-
 
   it.each(ids.filter((id) => id !== "autos"))("%s: assinatura do sindicante ao final", (id) => {
     const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
@@ -216,9 +239,18 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
   });
 
   it("oitivas usam o local dos trabalhos quando o campo local não é informado", () => {
-    for (const id of ["inquiricao", "depoimento"] as const) {
+    for (const id of ["inquiricao", "depoimento", "acareacao"] as const) {
       const texto = gerarPeca(id, SINDICANCIA, { ...CAMPOS, local: "" });
       expect(texto).toContain(SINDICANCIA.localTrabalhos);
+    }
+  });
+
+  it("despacho inicial e notificação puxam a Seção dos Atos (campo om) como local dos trabalhos, com data/hora de inquirição próprias", () => {
+    for (const id of ["despacho-inicial", "notificacao"] as const) {
+      const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
+      expect(texto).toContain(SINDICANCIA.om);
+      expect(texto).toMatch(/20 de março de 2026/); // dataInquiricao (2026-03-20) por extenso
+      expect(texto).toContain("14:30");
     }
   });
 
@@ -238,7 +270,11 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
   });
 
   it("datas no formato 'dia de mês de ano' seguem o art. 51: sem zero à esquerda, exceto o dia 1º com indicativo ordinal", () => {
-    const semZero = gerarPeca("encerramento", { ...SINDICANCIA, portariaData: "2026-03-04" }, CAMPOS);
+    const semZero = gerarPeca(
+      "encerramento",
+      { ...SINDICANCIA, portariaData: "2026-03-04" },
+      CAMPOS,
+    );
     expect(semZero).toContain("Portaria nº 015, de 4 de março de 2026");
     expect(semZero).not.toMatch(/\b04 de março\b/);
 
@@ -246,13 +282,62 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     expect(diaUm).toContain("1º de maio de 2026");
   });
 
-  it("usa sempre 'nº' (nunca 'nr') para Portaria e Ofício, conforme o art. 60", () => {
-    for (const id of ["notificacao", "oficio", "encerramento", "alegacoes", "prorrogacao"] as const) {
+  it("usa sempre 'nº' (nunca 'nr') para Portaria, Ofício e DIEx, conforme o art. 60", () => {
+    for (const id of [
+      "notificacao",
+      "diex",
+      "oficio",
+      "certidao",
+      "encerramento",
+      "alegacoes",
+      "prorrogacao",
+    ] as const) {
       const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
       expect(texto).not.toMatch(/\bnr\b/i);
     }
     const oficio = gerarPeca("oficio", SINDICANCIA, CAMPOS);
     expect(oficio).toContain(`Ofício nº ${CAMPOS.numeroOficio}`);
+  });
+
+  it("certidão certifica o fato descrito, com data por extenso", () => {
+    const texto = gerarPeca("certidao", SINDICANCIA, CAMPOS);
+    expect(texto).toMatch(/Certifico que, aos .+ dias do mês de março de dois mil e vinte e seis,/);
+    expect(texto).toContain(CAMPOS.justificativa);
+    expect(texto).toContain("Do que para constar, lavrei o presente termo.");
+  });
+
+  it("termo de acareação cita os dois acareados, o ponto de divergência, e cada um assina em linha própria", () => {
+    const texto = gerarPeca("acareacao", SINDICANCIA, CAMPOS);
+    expect(texto).toContain(CAMPOS.destinatario);
+    expect(texto).toContain(CAMPOS.qualificacao);
+    expect(texto).toContain(CAMPOS.destinatario2);
+    expect(texto).toContain(CAMPOS.qualificacao2);
+    expect(texto).toContain(CAMPOS.perguntas); // ponto de divergência
+    expect(naoVazias(texto).filter((l) => l === "Acareado(a)")).toHaveLength(2);
+  });
+
+  it("DIEx segue o modelo do Anexo II.2: número, destinatário, assunto/referência/anexo e rodapé configurável", () => {
+    const texto = gerarPeca("diex", SINDICANCIA, CAMPOS);
+    expect(texto).toContain(`DIEx nº ${CAMPOS.numeroDiex} - Sind`);
+    expect(texto).toContain(`Ao(À) ${CAMPOS.destinatario}`);
+    expect(texto).toContain(`Assunto: ${CAMPOS.assunto}`);
+    expect(texto).toContain(`Referência: ${CAMPOS.referencia}`);
+    expect(texto).toContain(`Anexo: ${CAMPOS.documentos}`);
+    expect(texto).toContain("Recebimento:");
+  });
+
+  it("DIEx sem referência/anexo não deixa os rótulos soltos, e rodapé 'nenhum' não aparece", () => {
+    const semExtras: PecaCampos = {
+      ...CAMPOS,
+      referencia: "",
+      documentos: "",
+      rodapeDiex: "nenhum",
+    };
+    const texto = gerarPeca("diex", SINDICANCIA, semExtras);
+    expect(texto).not.toContain("Referência:");
+    expect(texto).not.toContain("Anexo:");
+    expect(texto).not.toContain("Recebimento:");
+    expect(texto).not.toContain("Declaro que tenho ciência:");
   });
 });
 
@@ -320,5 +405,55 @@ describe("gerarRelatorio", () => {
       expect(texto).toContain(t);
     }
     expect(texto).not.toMatch(/undefined|null|NaN/);
+  });
+});
+
+describe("gerarDiligenciasRealizadas — padrão do Anexo W da EB10-IG-09.001", () => {
+  it("lista despachos, DIEx/ofícios e juntadas na ordem dos autos, numerados e com a folha", () => {
+    const s: Sindicancia = {
+      ...SINDICANCIA,
+      documentos: [
+        {
+          titulo: "Despacho Inicial",
+          documentId: "d1",
+          url: "",
+          pecaId: "despacho-inicial",
+          texto: "DESPACHO\n\nQuartel em Florianópolis-SC, 10 de março de 2026.",
+        },
+        {
+          titulo: "DIEx nº 001",
+          documentId: "d2",
+          url: "",
+          pecaId: "diex",
+          texto: "DIEx nº 001 - Sind\n\nAo(À) Sgt ALMEIDA\n\nAssunto: notificação",
+        },
+        {
+          titulo: "Termo de Abertura",
+          documentId: "d0",
+          url: "",
+          pecaId: "abertura",
+          texto: "TERMO DE ABERTURA\n\n...",
+        },
+        { titulo: "Juntada nº 1", documentId: "d3", url: "", pecaId: "juntada-j1", texto: "" },
+      ],
+      juntadas: [
+        { id: "j1", numero: 1, titulo: "Juntada de documentos", data: "2026-03-18", anexos: [] },
+      ],
+    };
+
+    const texto = gerarDiligenciasRealizadas(s);
+    expect(texto).toContain("Com o escopo de reunir elementos probatórios");
+    // A "Termo de Abertura" (pecaId "abertura") não é uma diligência e não deve aparecer.
+    expect(texto).not.toContain("TERMO DE ABERTURA");
+    expect(texto).toMatch(/1\. Despacho.*folha nº 1\)/);
+    expect(texto).toContain("2. DIEx nº 001-Sind");
+    expect(texto).toContain("folha nº 2");
+    expect(texto).toContain("Juntada nº 1, de 18 de março de 2026 (folha nº 4).");
+  });
+
+  it("sem nenhuma diligência realizada, devolve só a frase introdutória", () => {
+    const texto = gerarDiligenciasRealizadas(SINDICANCIA);
+    expect(texto).toContain("Com o escopo de reunir elementos probatórios");
+    expect(texto).not.toMatch(/^\d+\.\s/m);
   });
 });
