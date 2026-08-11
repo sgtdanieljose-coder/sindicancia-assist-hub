@@ -222,7 +222,7 @@ export function EditorJuntada({
                 {juntadaAtual.anexos.map((a) => (
                   <li key={a.fileId ?? a.id} className="truncate text-sm text-muted-foreground">
                     {a.url ? (
-                      
+                      <a
                         href={a.url}
                         target="_blank"
                         rel="noreferrer"
