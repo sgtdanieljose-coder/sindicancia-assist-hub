@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
-  gerarTextoJuntada,
+  textoEfetivoJuntada,
   type AnexoJuntada,
   type DadoSindicado,
   type Juntada,
@@ -88,9 +88,11 @@ export const removerSindicado = createServerFn({ method: "POST" })
 /**
  * Cria/atualiza o Google Doc de uma juntada específica (termo + lista de anexos + fotos/PDFs
  * incorporados), registra em atual.documentos (participando da paginação normal dos autos) e
- * reconstrói o documento único. Usado tanto ao criar a juntada quanto ao anexar um arquivo
- * novo — a cada chamada, o conteúdo é regenerado do zero a partir de atual.juntadas, então
- * fica sempre consistente com os anexos realmente cadastrados.
+ * reconstrói o documento único. Usado ao criar a juntada, ao anexar um arquivo novo e ao
+ * salvar uma edição manual de texto (ver salvarJuntada) — a cada chamada, o conteúdo é
+ * recalculado via textoEfetivoJuntada (texto editado manualmente, se houver, senão a lista
+ * automática a partir de atual.juntadas), então fica sempre consistente com o que a
+ * sindicância realmente tem cadastrado.
  */
 async function sincronizarDocumentoJuntada(
   atual: Sindicancia,
@@ -112,7 +114,9 @@ async function sincronizarDocumentoJuntada(
   const pecaId = `juntada-${juntada.id}`;
   const tituloInterno = `JUNTADA Nº ${juntada.numero}`;
   const tituloDoc = `${tituloInterno} — ${atual.nup || atual.id}`;
-  const conteudo = gerarTextoJuntada(atual, juntada);
+  // Usa o texto editado manualmente pelo usuário (Gerador Dinâmico de Peças > Juntada de
+  // Documentos), quando houver; senão volta a gerar a lista automática a partir dos anexos.
+  const conteudo = textoEfetivoJuntada(atual, juntada);
 
   const existente = atual.documentos.find((d) => d.pecaId === pecaId);
   const doc = existente
@@ -446,6 +450,40 @@ export const criarJuntada = createServerFn({ method: "POST" })
 
     await updateRow(linha, sindicanciaToRow(atual));
     return atual.juntadas.find((j) => j.id === juntada.id)!;
+  });
+
+/**
+ * Atualiza a data e/ou o texto editado manualmente de uma juntada já existente, e
+ * ressincroniza o Google Doc dela (e os autos). Usada pela aba "Juntada de
+ * Documentos" do Gerador Dinâmico de Peças — ao contrário de adicionarAnexo, não
+ * exige nenhum arquivo: serve só para digitar/ajustar o texto dos itens juntados.
+ * `textoEditado` vazio ("") faz a juntada voltar a usar a lista automática de
+ * anexos (ver textoEfetivoJuntada em pecas.ts).
+ */
+export const salvarJuntada = createServerFn({ method: "POST" })
+  .inputValidator(
+    (data: { sindicanciaId: string; juntadaId: string; data?: string; textoEditado?: string }) =>
+      data,
+  )
+  .handler(async ({ data }) => {
+    const { updateRow } = await import("./google.server");
+    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    let atual = atualInicial;
+
+    atual.juntadas = (atual.juntadas ?? []).map((j) =>
+      j.id === data.juntadaId
+        ? {
+            ...j,
+            data: data.data ?? j.data,
+            textoEditado: data.textoEditado !== undefined ? data.textoEditado : j.textoEditado,
+          }
+        : j,
+    );
+
+    atual = await sincronizarDocumentoJuntada(atual, data.juntadaId);
+
+    await updateRow(linha, sindicanciaToRow(atual));
+    return atual.juntadas.find((j) => j.id === data.juntadaId)!;
   });
 
 /** Envia um anexo para a pasta "Anexos" do NUP, vincula-o a uma juntada e atualiza o Google
