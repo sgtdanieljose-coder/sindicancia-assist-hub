@@ -1,11 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { Wand2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { useSindicancias } from "@/components/SindicanciaContext";
 import { EditorPeca } from "@/components/EditorPeca";
-import { gerarRelatorio, type Relatorio } from "@/lib/pecas";
+import { gerarDiligenciasRealizadas, gerarRelatorio, type Relatorio } from "@/lib/pecas";
 
 export const Route = createFileRoute("/relatorio")({
   head: () => ({
@@ -36,7 +38,7 @@ const partes: { key: keyof Relatorio; titulo: string; dica: string }[] = [
   {
     key: "diligencias",
     titulo: "2. DILIGÊNCIAS REALIZADAS",
-    dica: "Relação cronológica dos atos: notificações, inquirições, juntadas e perícias.",
+    dica: 'Relação cronológica dos atos (padrão do Anexo W da EB10-IG-09.001); use "Preencher com diligências" para montar a lista a partir dos despachos, DIEx/ofícios e juntadas já exportados, e ajuste o texto conforme necessário.',
   },
   {
     key: "analise",
@@ -101,7 +103,26 @@ function RelatorioPage() {
 
           {partes.map((p) => (
             <div key={p.key} className="space-y-1.5">
-              <Label>{p.titulo}</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>{p.titulo}</Label>
+                {p.key === "diligencias" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() =>
+                      setRel((r) => ({
+                        ...r,
+                        diligencias: gerarDiligenciasRealizadas(selecionada),
+                      }))
+                    }
+                  >
+                    <Wand2 className="size-3.5" />
+                    Preencher com diligências
+                  </Button>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">{p.dica}</p>
               <Textarea
                 className="min-h-32"
