@@ -240,7 +240,7 @@ export function EditorJuntada({
           </div>
 
           {juntadaAtual.url && (
-            
+            <a
               href={juntadaAtual.url}
               target="_blank"
               rel="noreferrer"
