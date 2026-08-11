@@ -21,6 +21,15 @@ export type Juntada = {
   /** Documento (Google Docs) desta juntada — termo + lista de anexos incorporada. */
   documentId?: string;
   url?: string;
+  /**
+   * Texto editado manualmente pelo usuário no Gerador Dinâmico de Peças. Quando
+   * presente (não vazio), tem prioridade sobre o texto gerado automaticamente a
+   * partir da lista de anexos — ver textoEfetivoJuntada() abaixo e
+   * sincronizarDocumentoJuntada em sindicancias.functions.ts, que é quem realmente
+   * decide o que vai para o Google Docs. Ficar em branco faz a juntada voltar a
+   * usar a lista automática (gerarTextoJuntada).
+   */
+  textoEditado?: string;
 };
 
 /** Snapshot do texto de uma peça, guardado a cada exportação/atualização. */
@@ -35,6 +44,13 @@ export type Sindicancia = {
   nup: string;
   portariaNumero: string;
   portariaData: string;
+  /** Antiga "Organização Militar (OM)". Hoje representa a "Seção dos Atos": o
+   *  local/seção onde são feitas as inquirições e demais atos da sindicância —
+   *  ver o rótulo em routes/index.tsx. Continua se chamando `om` internamente
+   *  (mesma coluna na planilha) para não quebrar dados já salvos; o valor
+   *  alimenta automaticamente o "local dos trabalhos" do Despacho Inicial e da
+   *  Notificação Prévia (ver gerarPeca) além do seu uso já existente ("no
+   *  quartel do ...", no Termo de Abertura e nas Juntadas). */
   om: string;
   autoridade: string;
   sindicante: string;
@@ -73,7 +89,9 @@ export type Sindicancia = {
   anexosUrl?: string;
   /** Cidade/localidade em que os atos são lavrados. */
   local: string;
-  /** Local específico dos trabalhos (onde serão feitas as oitivas) — ex.: sala/prédio, distinto da cidade. */
+  /** Campo legado ("local específico dos trabalhos") — mantido só como fallback para
+   *  sindicâncias antigas; hoje quem preenche esse papel é `om` (Seção dos Atos). Sem
+   *  campo próprio no formulário. */
   localTrabalhos: string;
   /** Subordinação da OM (ex.: "12ª Brigada de Infantaria Leve"). */
   subordinacao: string;
@@ -158,10 +176,11 @@ export const TAGS_DISPONIVEIS = [
  *   - abertura, despacho-inicial, despacho-diversos, encerramento: art. 66, IX
  *     (Termo) / despacho de mero expediente — não têm modelo gráfico próprio na IG,
  *     por isso reaproveitam a convenção-base.
- *   - notificacao, alegacoes, oficio, prorrogacao: adaptações do Ofício (Anexo I.1,
- *     Fig A-1/A-2.1/A-2.2).
- *   - inquiricao, depoimento: rito de sindicância (EB10-IG-09.001), não da
- *     correspondência — também seguem a convenção-base deste app.
+ *   - notificacao, alegacoes, oficio, prorrogacao, diex: adaptações do Ofício/DIEx
+ *     (Anexo I.1 e II.2).
+ *   - inquiricao, depoimento, acareacao: rito de sindicância (EB10-IG-09.001), não
+ *     da correspondência — também seguem a convenção-base deste app.
+ *   - certidao: art. 66, IX (Termo/Certidão) — modelo simples de "Certifico que...".
  */
 export const PECAS = [
   {
@@ -195,6 +214,12 @@ export const PECAS = [
     etapa: "Notificação prévia do sindicado",
   },
   {
+    id: "diex",
+    nome: "DIEx (Documento Interno do Exército)",
+    unica: false,
+    etapa: undefined,
+  },
+  {
     id: "inquiricao",
     nome: "Termo de Inquirição de Testemunha",
     unica: false,
@@ -206,7 +231,19 @@ export const PECAS = [
     unica: true,
     etapa: "Depoimento do sindicado",
   },
+  {
+    id: "acareacao",
+    nome: "Termo de Acareação",
+    unica: false,
+    etapa: undefined,
+  },
   { id: "oficio", nome: "Ofício / Mandado de Intimação", unica: false, etapa: undefined },
+  {
+    id: "certidao",
+    nome: "Certidão",
+    unica: false,
+    etapa: undefined,
+  },
   {
     id: "encerramento",
     nome: "Termo de Encerramento da Instrução",
@@ -224,18 +261,68 @@ export const PECAS = [
 
 export type PecaId = (typeof PECAS)[number]["id"];
 
+/**
+ * Opções de rodapé para o DIEx (Anexo II.2 da EB10-IG-01.001): tanto o modelo de
+ * "Recebimento" (quando o destinatário só precisa confirmar que recebeu, ex.:
+ * DIEx de encaminhamento/solicitação) quanto o de "Declaro que tenho ciência"
+ * (mais comum em notificações que exigem ciência formal do destinatário) aparecem
+ * nos DIEx e Ofícios já produzidos por esta OM.
+ */
+export const RODAPE_DIEX_OPCOES = [
+  {
+    value: "recebimento",
+    label: "Recebimento (data/hora + assinatura do destinatário)",
+    texto: [
+      "Recebimento:",
+      "",
+      "Dia ..../....../....... às....... horas",
+      "",
+      "____________________________________",
+    ].join("\n"),
+  },
+  {
+    value: "ciencia",
+    label: "Declaro que tenho ciência (data/hora + assinatura)",
+    texto: [
+      "Declaro que tenho ciência:",
+      "",
+      "Dia ..../....../....... às....... horas",
+      "",
+      "____________________________________",
+    ].join("\n"),
+  },
+  { value: "nenhum", label: "Nenhum (sem campo de recebimento)", texto: "" },
+] as const;
+
+export type RodapeDiex = (typeof RODAPE_DIEX_OPCOES)[number]["value"];
+
 export type PecaCampos = {
   local: string;
+  /** Data que a própria peça carrega (fecho do despacho, epígrafe do ofício/DIEx etc.). */
   data: string;
+  /** Data marcada para a inquirição/oitiva — usada por Despacho Inicial e Notificação
+   *  Prévia na frase "Designo o dia ..."/"Deverá comparecer no dia ...". Distinta de
+   *  `data` (a data da PEÇA em si) — antes do EB10-IG-09.001 este app reaproveitava o
+   *  mesmo campo para as duas coisas, o que não faz sentido (a peça pode ser lavrada
+   *  num dia e marcar a oitiva para outro). */
+  dataInquiricao: string;
   hora: string;
   destinatario: string;
   qualificacao: string;
+  /** 2º acareado — só usado pelo Termo de Acareação. */
+  destinatario2: string;
+  qualificacao2: string;
   documentos: string;
   perguntas: string;
   respostas: string;
   justificativa: string;
   prazoDias: string;
   numeroOficio: string;
+  /** Campos exclusivos do DIEx (Anexo II.2). */
+  numeroDiex: string;
+  assunto: string;
+  referencia: string;
+  rodapeDiex: RodapeDiex;
 };
 
 export function diasCorridos(dataInicio: string) {
@@ -333,11 +420,8 @@ export function dataPorExtenso(iso: string) {
  * "4 de março de 2026" (dia sem zero à esquerda) ou "1º de maio de 2026" (dia 1
  * sempre com o indicativo ordinal "º") — art. 51, I e II, da EB10-IG-01.001, que dá
  * exatamente esses dois exemplos ("4 de março... e não 04 de março..."; "1º de
- * maio... e não 1 de maio..."). A versão anterior usava
- * `toLocaleDateString(..., { day: "2-digit" })`, que sempre preenchia o dia com
- * zero à esquerda (ex.: "04 de julho") — o contrário do que a IG pede. Usa o
- * array MESES (o mesmo de dataPorExtenso) em vez de depender de dados de locale
- * do runtime para o nome do mês.
+ * maio... e não 1 de maio..."). Usa o array MESES (o mesmo de dataPorExtenso) em
+ * vez de depender de dados de locale do runtime para o nome do mês.
  */
 function dataExtenso(iso: string) {
   if (!iso) return "____ de __________ de ______";
@@ -381,7 +465,10 @@ const linha = "_".repeat(66);
 //      (google.server.ts); a função assinatura() abaixo só cuida do espaçamento
 //      mínimo de 3 linhas em branco antes da assinatura, pedido pelo art. 57, e a
 //      formatação também marca esse trecho para não ficar isolado numa página
-//      própria (art. 45 — ver requestsEvitarAssinaturaIsolada).
+//      própria (art. 45 — ver requestsEvitarAssinaturaIsolada). Peças com um
+//      segundo signatário (ex.: acareacao) inserem as próprias linhas de assinatura
+//      ANTES da assinatura do Sindicante, do mesmo jeito que inquiricao/depoimento
+//      já fazem com "Depoente"/"Testemunha".
 //      OBS.: as variantes de assinatura delegada ("Por ordem", "Por delegação", "No
 //      impedimento de" — art. 57, IV a VII) ainda não têm campo próprio no
 //      formulário; se forem necessárias, é preciso adicionar um campo à
@@ -443,11 +530,15 @@ function assinatura(s: Sindicancia) {
 
 export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
   const local = c.local || s.local || "____________";
-  // Oitivas (inquirição/depoimento) usam o local específico dos trabalhos quando preenchido.
+  // Oitivas (inquirição/depoimento/acareação) usam o local específico dos trabalhos
+  // quando preenchido. Comportamento inalterado — quem passou a puxar "Seção dos
+  // Atos" (s.om) automaticamente foi só o Despacho Inicial e a Notificação Prévia,
+  // que perderam o campo manual de local (ver mais abaixo).
   const localOitiva = c.local || s.localTrabalhos || s.local || "____________";
   const head = cabecalho(s);
 
   if (peca === "autos") {
+    const dataTxt = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
     return [
       head.replace(/\n+$/, ""),
       ...ESPACO_ANTES_TITULO,
@@ -462,6 +553,9 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
       `SINDICADO: ${s.sindicado || "____________"}`,
       "",
       `OBJETO: ${s.objeto || "____________"}`,
+      "",
+      "",
+      `${s.local || "____________"}, ${dataTxt}.`,
       "",
     ].join("\n");
   }
@@ -490,9 +584,17 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
         const dataPortariaTxt = s.portariaData ? dataExtenso(s.portariaData) : "“data da portaria”";
         const autoridadeTxt = s.autoridade || "“Autoridade Instauradora da base de dados”";
         const omTxt = s.om || "“OM adicionada na base de dados”";
-        const dataOitivaTxt = c.data ? dataExtenso(c.data) : "“data designada”";
+        // Data/hora da OITIVA (não a data da peça em si) — campo próprio dataInquiricao.
+        const dataOitivaTxt = c.dataInquiricao ? dataExtenso(c.dataInquiricao) : "“data designada”";
         const horaTxt = c.hora || "__:__";
-        const localOitivaTxt = s.localTrabalhos || "“local dos trabalhos”";
+        // "Seção dos Atos" (campo s.om, renomeado no formulário — ver Gestor do
+        // Processo) entra automaticamente como local dos trabalhos; não há mais
+        // campo manual de local para esta peça. OBS.: como `s.om` também é usado
+        // acima em "Comandante do ${omTxt}", quem preencher esse campo com algo
+        // muito específico (ex.: "Fiscalização Administrativa do 63º BI") deve
+        // conferir se a frase "Comandante do..." continua fazendo sentido — ver
+        // comentário no início do arquivo sobre essa dupla função do campo.
+        const localOitivaTxt = s.om || s.localTrabalhos || s.local || "“local dos trabalhos”";
         const fechamentoData = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
         return [
           ...ESPACO_ANTES_TITULO,
@@ -524,17 +626,59 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
         ].join("\n");
       }
 
-      case "notificacao":
+      case "notificacao": {
+        const dataPecaTxt = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        const dataInquiricaoTxt = c.dataInquiricao
+          ? dataExtenso(c.dataInquiricao)
+          : "“data designada”";
+        const horaTxt = c.hora || "__:__";
+        // Mesma lógica do Despacho Inicial: "Seção dos Atos" (s.om) auto-preenche o
+        // local dos trabalhos, sem campo manual nesta peça.
+        const localOitivaTxt = s.om || s.localTrabalhos || s.local || "____________";
         return [
           subcabecalhoProcesso(s),
           "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
+          "",
+          `${s.local || "____________"}, ${dataPecaTxt}.`,
           "",
           `Notifico V. S.ª, ${s.sindicado || "Posto/Grad e Nome de Guerra do sindicado"}, ${c.qualificacao || "qualificação"}, de que responde à presente Sindicância, instaurada pela Portaria nº ${s.portariaNumero || "____"}, de ${dataExtenso(s.portariaData)}, tendo por objeto ${s.objeto || "os fatos nela descritos"}.`,
           "",
           "Fica assegurado o direito ao contraditório e à ampla defesa, podendo acompanhar todos os atos do procedimento, pessoalmente ou por procurador, arrolar testemunhas, requerer diligências e produzir provas em direito admitidas.",
           "",
-          `Deverá comparecer no dia ${dataExtenso(c.data)}, às ${c.hora || "__:__"} horas, em ${local}, a fim de ser ouvido em declarações.`,
+          `Deverá comparecer no dia ${dataInquiricaoTxt}, às ${horaTxt} horas, em ${localOitivaTxt}, a fim de ser ouvido em declarações.`,
         ].join("\n");
+      }
+
+      case "diex": {
+        // Modelo do Anexo II.2 da EB10-IG-01.001 (DIEx): epígrafe com número e data,
+        // "Do.../Ao...", Assunto (sempre em negrito — ver ROTULOS_NEGRITO em
+        // google.server.ts), Referência(s)/Anexo(s) quando houver, corpo numerado
+        // pelo próprio usuário (campo justificativa) e um rodapé configurável.
+        const numeroTxt = c.numeroDiex || "____";
+        const destinatarioTxt =
+          c.destinatario || "Posto/Grad e Nome de Guerra / Cargo do destinatário";
+        const assuntoTxt = c.assunto || "assunto do expediente";
+        const dataTxt = c.data ? dataExtenso(c.data) : "__ de __________ de ____";
+        const rodapeTxt = RODAPE_DIEX_OPCOES.find((o) => o.value === c.rodapeDiex)?.texto ?? "";
+        return [
+          subcabecalhoProcesso(s),
+          "DIEX",
+          "",
+          `DIEx nº ${numeroTxt} - Sind`,
+          "",
+          `${s.local || "____________"}, ${dataTxt}.`,
+          "",
+          `Do(a) ${s.sindicante || "Posto/Grad e Nome de Guerra"} (Sindicante)`,
+          `Ao(À) ${destinatarioTxt}`,
+          "",
+          `Assunto: ${assuntoTxt}`,
+          ...(c.referencia.trim() ? ["", `Referência: ${c.referencia}`] : []),
+          ...(c.documentos.trim() ? ["", `Anexo: ${c.documentos}`] : []),
+          "",
+          c.justificativa || "1. ...",
+          ...(rodapeTxt ? ["", rodapeTxt] : []),
+        ].join("\n");
+      }
 
       case "inquiricao":
         return [
@@ -576,6 +720,33 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           "Sindicado",
         ].join("\n");
 
+      case "acareacao": {
+        const dataTxt = c.data ? dataPorExtenso(c.data) : "“data por extenso”";
+        const horaTxt = c.hora || "__:__";
+        const pessoa1 = c.destinatario || "Posto/Grad e Nome de Guerra (1º acareado)";
+        const pessoa2 = c.destinatario2 || "Posto/Grad e Nome de Guerra (2º acareado)";
+        return [
+          subcabecalhoProcesso(s),
+          "TERMO DE ACAREAÇÃO",
+          "",
+          `Aos ${dataTxt}, às ${horaTxt} horas, em ${localOitiva}, presente o Sindicante, procedeu-se à acareação entre ${pessoa1}, ${c.qualificacao || "qualificação"}, e ${pessoa2}, ${c.qualificacao2 || "qualificação"}, tendo em vista a divergência verificada em suas declarações anteriores, notadamente quanto a: ${c.perguntas || "“ponto de divergência”"}.`,
+          "",
+          "Após lidas aos acareados as passagens divergentes de suas declarações anteriores, foram os mesmos reperguntados sobre os pontos controvertidos, tendo respondido:",
+          "",
+          c.respostas || "...",
+          "",
+          "Nada mais havendo, encerrou-se o presente termo, lido e achado conforme, que vai devidamente assinado pelo Sindicante e pelos acareados.",
+          "",
+          "",
+          "____________________________________",
+          "Acareado(a)",
+          "",
+          "",
+          "____________________________________",
+          "Acareado(a)",
+        ].join("\n");
+      }
+
       case "oficio":
         return [
           subcabecalhoProcesso(s),
@@ -594,6 +765,18 @@ export function gerarPeca(peca: PecaId, s: Sindicancia, c: PecaCampos): string {
           "",
           "3. Coloco-me à disposição para os esclarecimentos que se fizerem necessários.",
         ].join("\n");
+
+      case "certidao": {
+        const dataTxt = c.data ? dataPorExtenso(c.data) : "“data por extenso”";
+        return [
+          subcabecalhoProcesso(s),
+          "CERTIDÃO",
+          "",
+          `Certifico que, aos ${dataTxt}, ${c.justificativa || "“fato certificado”"}.`,
+          "",
+          "Do que para constar, lavrei o presente termo.",
+        ].join("\n");
+      }
 
       case "encerramento":
         return [
@@ -665,6 +848,18 @@ export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
   ].join("\n");
 
   return `${cabecalho(s)}${corpo}\n${assinatura(s)}`;
+}
+
+/**
+ * Texto "efetivo" de uma juntada: o editado manualmente pelo usuário no Gerador
+ * Dinâmico de Peças (`textoEditado`), se houver algum conteúdo digitado, senão o
+ * texto gerado automaticamente a partir da lista de anexos (gerarTextoJuntada).
+ * Usada tanto para pré-preencher a área de edição livre quanto — do lado do
+ * servidor, em sincronizarDocumentoJuntada (sindicancias.functions.ts) — para
+ * decidir o que efetivamente vai para o Google Docs.
+ */
+export function textoEfetivoJuntada(s: Sindicancia, j: Juntada): string {
+  return j.textoEditado && j.textoEditado.trim() ? j.textoEditado : gerarTextoJuntada(s, j);
 }
 
 /**
@@ -765,4 +960,92 @@ export function gerarRelatorio(s: Sindicancia, r: Relatorio, local: string, data
     `${local || s.local || "________________"}, ${dataExtenso(data)}.`,
     assinatura(s),
   ].join("\n");
+}
+
+/** Tipo mínimo de peça exportada de que gerarDiligenciasRealizadas precisa — evita
+ *  importar o tipo completo de Sindicancia["documentos"][number] repetidamente. */
+type PecaExportadaResumo = { pecaId?: string; texto?: string };
+
+/** Extrai, de um DIEx/Ofício já exportado (a partir do texto que o próprio app
+ *  gerou — por isso as expressões regulares abaixo batem com certeza), um resumo
+ *  curto no padrão do Anexo W: número do expediente, data (quando identificável) e
+ *  destinatário. Best-effort: o resultado é só um ponto de partida editável. */
+function resumoDiexOuOficio(pecaId: string, texto: string): string {
+  if (pecaId === "diex") {
+    const numero = texto.match(/DIEx nº (\S+)/)?.[1];
+    const destinatario = texto.match(/Ao\(À\) (.+)/)?.[1]?.trim();
+    const partes = [
+      `DIEx nº ${numero ?? "____"}-Sind`,
+      destinatario ? `dirigido a ${destinatario}` : undefined,
+    ].filter(Boolean);
+    return partes.join(", ");
+  }
+  // oficio
+  const numero = texto.match(/Ofício nº (\S+)/)?.[1];
+  const destinatario = texto.match(/Ao Senhor (.+)/)?.[1]?.trim();
+  const dataAto = texto.match(/no dia (.+?), às/)?.[1];
+  const partes = [
+    `Ofício nº ${numero ?? "____"}-Sind`,
+    dataAto ? `de ${dataAto}` : undefined,
+    destinatario ? `dirigido a ${destinatario}` : undefined,
+  ].filter(Boolean);
+  return partes.join(", ");
+}
+
+/**
+ * Gera o texto do item "2. DILIGÊNCIAS REALIZADAS" do Relatório, no padrão do
+ * ANEXO W da EB10-IG-09.001 (relação numerada de despachos, DIEx/ofícios expedidos
+ * e juntadas, cada item com a folha em que consta nos autos) — modelo real
+ * observado em sindicâncias já produzidas por esta OM:
+ *   "1. Of nº01-Sind, 26 de maio de 2026, dirigido a ..., notificando... (folha nº
+ *   04); 2. DIEx nº 001-Sind, ... (folha nº 37); ... e N. ... (folha nº X)."
+ * Percorre `s.documentos` NA ORDEM em que aparecem nos autos (a posição+1 é a
+ * mesma numeração "Fls. N" usada no documento único — ver rebuildAutos em
+ * google.server.ts) e inclui despachos, DIEx/ofícios e juntadas; ignora as demais
+ * peças (abertura, encerramento, notificações, relatório etc., que não são
+ * "diligências" no sentido do Anexo W). Devolve um texto pronto para colar no
+ * campo — o usuário pode (e deve) revisar/ajustar depois, já que a extração dos
+ * dados de cada peça é best-effort (ver resumoDiexOuOficio).
+ */
+export function gerarDiligenciasRealizadas(s: Sindicancia): string {
+  const documentos = s.documentos as PecaExportadaResumo[];
+  const itens: string[] = [];
+
+  documentos.forEach((d, idx) => {
+    const folha = idx + 1;
+
+    if (d.pecaId?.startsWith("juntada-")) {
+      const juntada = s.juntadas.find((j) => `juntada-${j.id}` === d.pecaId);
+      if (!juntada) return;
+      itens.push(
+        `Juntada nº ${juntada.numero}, de ${dataExtenso(juntada.data)} (folha nº ${folha})`,
+      );
+      return;
+    }
+
+    if (d.pecaId === "diex" || d.pecaId === "oficio") {
+      itens.push(`${resumoDiexOuOficio(d.pecaId, d.texto ?? "")} (folha nº ${folha})`);
+      return;
+    }
+
+    if (d.pecaId === "despacho-inicial" || d.pecaId === "despacho-diversos") {
+      const dataAto = (d.texto ?? "").match(/Quartel em .+?,\s*(.+?)\./)?.[1];
+      itens.push(`Despacho${dataAto ? `, de ${dataAto},` : ""} (folha nº ${folha})`);
+    }
+  });
+
+  const introducao =
+    "Com o escopo de reunir elementos probatórios que pudessem esclarecer o fato objeto da presente sindicância, este encarregado houve por bem diligenciar, tendo sido procedidas as seguintes diligências:";
+
+  if (!itens.length) return introducao;
+
+  const lista = itens
+    .map((texto, i) => {
+      const numero = i + 1;
+      const fechamento = i === itens.length - 1 ? "." : i === itens.length - 2 ? "; e" : ";";
+      return `${numero}. ${texto}${fechamento}`;
+    })
+    .join("\n\n");
+
+  return `${introducao}\n\n${lista}`;
 }
