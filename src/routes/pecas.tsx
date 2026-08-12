@@ -284,6 +284,7 @@ function Pecas() {
 
       <div className="grid gap-4 lg:grid-cols-[240px_320px_1fr]">
         <GuiaDocumento
+          sindicanciaId={selecionada.id}
           documentos={selecionada.documentos ?? []}
           autosUrl={selecionada.autosUrl}
           pecaSelecionada={ehJuntada ? undefined : peca}
