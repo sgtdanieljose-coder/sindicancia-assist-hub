@@ -39,6 +39,29 @@ export type VersaoPeca = {
   criadoEm: string;
 };
 
+/** Situação de controle processual de uma peça já lançada nos autos — Prioridade 2.3 da
+ *  evolução do sistema. Editável pelo usuário direto no índice dos autos, sem precisar
+ *  abrir o Google Docs. */
+export const STATUS_PECA = [
+  "nao-iniciada",
+  "em-elaboracao",
+  "em-revisao",
+  "concluida",
+  "juntada-aos-autos",
+  "cancelada",
+] as const;
+
+export type StatusPeca = (typeof STATUS_PECA)[number];
+
+export const STATUS_PECA_LABEL: Record<StatusPeca, string> = {
+  "nao-iniciada": "Não iniciada",
+  "em-elaboracao": "Em elaboração",
+  "em-revisao": "Em revisão",
+  concluida: "Concluída",
+  "juntada-aos-autos": "Juntada aos autos",
+  cancelada: "Cancelada",
+};
+
 export type Sindicancia = {
   id: string;
   nup: string;
@@ -78,6 +101,16 @@ export type Sindicancia = {
      * buscar do Google Docs normalmente.
      */
     texto?: string;
+    /** Situação de controle (Prioridade 2.3). Peças exportadas antes desta mudança não têm
+     *  este campo — tratar ausência como "concluida" (o documento já existe no Drive). */
+    status?: StatusPeca;
+    /** Quando este item passou a existir nos autos pela 1ª vez (1ª exportação bem-sucedida).
+     *  Ausente em registros salvos antes desta mudança. */
+    criadoEm?: string;
+    /** Última exportação/atualização/restauração desta peça específica — distinto do
+     *  `atualizadoEm` da sindicância como um todo (esse é global e muda a cada salvamento
+     *  de qualquer coisa). Ausente em registros salvos antes desta mudança. */
+    atualizadoEm?: string;
   }[];
 
   atualizadoEm: string;
