@@ -128,7 +128,17 @@ function columnLetter(index: number): string {
 
 const ULTIMA_COLUNA = columnLetter(HEADERS.length);
 
+// Cache em memória (por isolate/instância do servidor) de que a aba já foi conferida
+// nesta "vida" do processo — ver Prioridade 1.4/1.11 da evolução do sistema. Antes,
+// ensureTab() rodava 1-2 chamadas extras ao Sheets (metadata + checagem de cabeçalho) em
+// TODA operação que lê ou grava a planilha (readRows, appendRow, salvarSindicancia,
+// exportarParaDocs, etc.) — mesmo quando nada mudou desde a última checagem. Como a aba
+// não é apagada/recriada em uso normal, uma vez confirmada não precisa ser checada de novo
+// até o processo reiniciar (ou até um erro indicar que algo mudou por fora).
+let abaConferida = false;
+
 export async function ensureTab() {
+  if (abaConferida) return;
   const meta = await gw<{ sheets: { properties: { title: string } }[] }>(
     "google_sheets",
     `/v4/spreadsheets/${SPREADSHEET_ID}`,
@@ -150,6 +160,7 @@ export async function ensureTab() {
         body: { values: [HEADERS] },
       },
     );
+    abaConferida = true;
     return;
   }
 
@@ -170,6 +181,7 @@ export async function ensureTab() {
       },
     );
   }
+  abaConferida = true;
 }
 
 export async function readRows(): Promise<string[][]> {
@@ -229,7 +241,11 @@ export const SINDICADOS_HEADERS = [
 
 const ULTIMA_COLUNA_SINDICADOS = columnLetter(SINDICADOS_HEADERS.length);
 
+// Mesmo cache de abaConferida, para a aba Dados_Sindicado.
+let abaSindicadosConferida = false;
+
 async function ensureSindicadosTab() {
+  if (abaSindicadosConferida) return;
   const meta = await gw<{ sheets: { properties: { title: string } }[] }>(
     "google_sheets",
     `/v4/spreadsheets/${SPREADSHEET_ID}`,
@@ -251,6 +267,7 @@ async function ensureSindicadosTab() {
         body: { values: [SINDICADOS_HEADERS] },
       },
     );
+    abaSindicadosConferida = true;
     return;
   }
 
@@ -270,6 +287,7 @@ async function ensureSindicadosTab() {
       },
     );
   }
+  abaSindicadosConferida = true;
 }
 
 /** Lê todas as linhas de Dados_Sindicado (não filtra vazias — quem chama sabe a posição real). */
