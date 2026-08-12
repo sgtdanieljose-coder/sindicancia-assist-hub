@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, ExternalLink, FileUp, History, Loader2, RotateCcw, Undo2 } from "lucide-react";
+import { Check, ExternalLink, FileUp, History, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -20,9 +20,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { desfazerInsercao, listarVersoes, restaurarVersao } from "@/lib/sindicancias.functions";
+import { desfazerInsercao, listarVersoes } from "@/lib/sindicancias.functions";
 import { salvarRascunho, chaveRascunho } from "@/lib/localStore";
 import { useStatusSincronizacao, useSyncQueue, alvoPeca } from "@/hooks/useSyncQueue";
+import { HistoricoVersoesDialog } from "@/components/HistoricoVersoesDialog";
 
 /** Formato devolvido por exportarParaDocs (ver sindicancias.functions.ts) — repetido aqui
  *  porque a exportação agora passa pela fila (useSyncQueue), que carrega o resultado como
@@ -133,7 +134,7 @@ export function EditorPeca({
   // usuário clicar mais de uma vez.
   // ------------------------------------------------------------------------------------
   const { enfileirarExportarPeca, enfileirarSincronizarAutos } = useSyncQueue();
-  const alvoExportacao = alvoPeca(sindicanciaId, pecaId);
+  const alvoExportacao = alvoPeca(sindicanciaId, existente?.documentId, pecaId);
   const statusExportacao = useStatusSincronizacao(alvoExportacao);
   const ultimoResultadoTratado = useRef<string | undefined>(undefined);
 
@@ -174,7 +175,10 @@ export function EditorPeca({
     statusExportacao?.status === "processing" || statusExportacao?.status === "retrying";
 
   const exportar = (pos?: number) => {
-    enfileirarExportarPeca({ sindicanciaId, titulo, conteudo, posicao: pos, pecaId, unica, etapa });
+    enfileirarExportarPeca(
+      { sindicanciaId, titulo, conteudo, posicao: pos, pecaId, unica, etapa },
+      { documentId: existente?.documentId },
+    );
     setPerguntando(false);
   };
 
@@ -201,27 +205,6 @@ export function EditorPeca({
     enabled: Boolean(documentIdAtual),
     queryFn: () =>
       listarVersoes({ data: { sindicanciaId, documentId: documentIdAtual as string } }),
-  });
-
-  const restaurar = useMutation({
-    mutationFn: (versaoId: string) =>
-      restaurarVersao({
-        data: { sindicanciaId, documentId: documentIdAtual as string, versaoId, pecaId },
-      }),
-    onSuccess: (d) => {
-      onChange(d.texto);
-      setHistoricoAberto(false);
-      void versoes.refetch();
-      toast.success(
-        "Versão anterior restaurada — peça atualizada, autos pendentes de sincronizar.",
-      );
-      if (d.avisoFormatacao) {
-        toast.warning(`Texto restaurado, mas a formatação falhou: ${d.avisoFormatacao}`);
-      }
-      enfileirarSincronizarAutos({ sindicanciaId });
-      onExportado?.();
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   const listaVersoes = versoes.data?.versoes ?? [];
@@ -269,56 +252,15 @@ export function EditorPeca({
         </div>
       </div>
 
-      <Dialog open={historicoAberto} onOpenChange={setHistoricoAberto}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Histórico de versões desta peça</DialogTitle>
-            <DialogDescription>
-              Cada exportação/atualização guarda o texto anterior. Restaurar reescreve o documento
-              individual e repagina os autos — o texto atual vira uma nova entrada do histórico.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="max-h-[55vh] space-y-2 overflow-y-auto">
-            {versoes.isFetching && listaVersoes.length === 0 && (
-              <p className="text-sm text-muted-foreground">Carregando histórico...</p>
-            )}
-            {!versoes.isFetching && listaVersoes.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Ainda não há versões anteriores — o histórico começa na primeira atualização desta
-                peça.
-              </p>
-            )}
-            {listaVersoes.map((v, i) => (
-              <div key={v.id} className="rounded-md border border-border p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium">
-                    Versão {listaVersoes.length - i} —{" "}
-                    {new Date(v.criadoEm).toLocaleString("pt-BR")}
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => restaurar.mutate(v.id)}
-                    disabled={restaurar.isPending}
-                  >
-                    {restaurar.isPending ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <RotateCcw className="size-4" />
-                    )}
-                    Restaurar
-                  </Button>
-                </div>
-                <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
-                  {v.texto.slice(0, 400)}
-                  {v.texto.length > 400 ? "..." : ""}
-                </pre>
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <HistoricoVersoesDialog
+        sindicanciaId={sindicanciaId}
+        documentId={documentIdAtual}
+        pecaId={pecaId}
+        aberto={historicoAberto}
+        onOpenChange={setHistoricoAberto}
+        onRestaurado={onChange}
+        onAtualizado={onExportado}
+      />
 
       {ultimaInsercao && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
