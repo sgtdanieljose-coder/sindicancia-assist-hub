@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { adicionarAnexo, criarJuntada, salvarJuntada } from "@/lib/sindicancias.functions";
 import { textoEfetivoJuntada, type Sindicancia } from "@/lib/pecas";
+import { useSyncQueue } from "@/hooks/useSyncQueue";
 
 function lerArquivo(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -50,6 +51,12 @@ export function EditorJuntada({
 
   const juntadaAtual = juntadas.find((j) => j.id === juntadaId);
 
+  // Prioridade 1.7: criar/salvar juntada e enviar anexo já não reconstroem o documento
+  // único dos autos por dentro (ver sincronizarDocumentoJuntada em
+  // sindicancias.functions.ts) — cada ação bem-sucedida abaixo enfileira essa reconstrução
+  // à parte (dedupe automático: várias ações em sequência viram 1 única sincronização).
+  const { enfileirarSincronizarAutos } = useSyncQueue();
+
   // Sempre que a juntada selecionada mudar (ou for atualizada por fora — novo anexo,
   // por exemplo), sincroniza os campos locais com o estado mais recente dela.
   useEffect(() => {
@@ -68,6 +75,7 @@ export function EditorJuntada({
       setJuntadaId(j.id);
       setNovoTitulo("");
       toast.success(`Juntada nº ${j.numero} criada`);
+      enfileirarSincronizarAutos({ sindicanciaId: sindicancia.id });
       onAtualizado();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -84,7 +92,8 @@ export function EditorJuntada({
         },
       }),
     onSuccess: () => {
-      toast.success("Juntada salva e autos atualizados");
+      toast.success("Juntada salva — autos pendentes de sincronizar");
+      enfileirarSincronizarAutos({ sindicanciaId: sindicancia.id });
       onAtualizado();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -106,8 +115,9 @@ export function EditorJuntada({
       });
     },
     onSuccess: () => {
-      toast.success("Anexo enviado e incorporado à juntada");
+      toast.success("Anexo enviado — autos pendentes de sincronizar");
       setArquivo(null);
+      enfileirarSincronizarAutos({ sindicanciaId: sindicancia.id });
       onAtualizado();
     },
     onError: (e: Error) => toast.error(e.message),
