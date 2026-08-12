@@ -1,7 +1,9 @@
-import { AlignLeft, ExternalLink } from "lucide-react";
+import { AlignLeft, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { PECAS, type PecaId, type Sindicancia } from "@/lib/pecas";
+import { useStatusSincronizacao, useSyncQueue, alvoAutos } from "@/hooks/useSyncQueue";
 
 type Props = {
+  sindicanciaId: string;
   documentos: Sindicancia["documentos"];
   autosUrl?: string;
   /** Peça atualmente selecionada no formulário à direita, para realçar o item correspondente. */
@@ -10,13 +12,42 @@ type Props = {
   onSelecionarPeca?: (pecaId: PecaId) => void;
 };
 
+/** Rótulo/estilo do status de sincronização dos autos — Prioridade 1.8. */
+function statusAutos(status?: "pending" | "processing" | "completed" | "failed" | "retrying") {
+  switch (status) {
+    case "pending":
+      return { texto: "Autos: alterações pendentes", className: "text-amber-600" };
+    case "processing":
+      return { texto: "Sincronizando autos...", className: "text-muted-foreground" };
+    case "retrying":
+      return { texto: "Tentando sincronizar de novo...", className: "text-amber-600" };
+    case "failed":
+      return { texto: "Erro ao sincronizar autos", className: "text-destructive" };
+    case "completed":
+      return { texto: "Autos sincronizados", className: "text-green-600" };
+    default:
+      return null;
+  }
+}
+
 /**
  * Lista, em ordem de paginação — a MESMA ordem usada por rebuildAutos (google.server.ts) para
  * numerar "Fls. N" no documento único —, todas as peças já lançadas nesta sindicância.
  * Inspirado no "Guia do documento" do Google Docs: uma coluna estreita e discreta, fixa à
  * esquerda, servindo de índice/navegação para os autos.
  */
-export function GuiaDocumento({ documentos, autosUrl, pecaSelecionada, onSelecionarPeca }: Props) {
+export function GuiaDocumento({
+  sindicanciaId,
+  documentos,
+  autosUrl,
+  pecaSelecionada,
+  onSelecionarPeca,
+}: Props) {
+  const { enfileirarSincronizarAutos } = useSyncQueue();
+  const statusSync = useStatusSincronizacao(alvoAutos(sindicanciaId));
+  const info = statusAutos(statusSync?.status);
+  const sincronizando = statusSync?.status === "processing" || statusSync?.status === "retrying";
+
   return (
     <div className="painel flex h-fit flex-col gap-1 p-3 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
       <div className="flex items-center gap-1.5 px-1 pb-1">
@@ -34,6 +65,26 @@ export function GuiaDocumento({ documentos, autosUrl, pecaSelecionada, onSelecio
           <ExternalLink className="size-3.5 shrink-0" />
           Ver autos completos
         </a>
+      )}
+
+      {(info || documentos.length > 0) && (
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-1 px-1">
+          {info && <span className={`text-[11px] ${info.className}`}>{info.texto}</span>}
+          <button
+            type="button"
+            onClick={() => enfileirarSincronizarAutos({ sindicanciaId })}
+            disabled={sincronizando}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-60"
+            title="Reconstrói o documento único a partir das peças já salvas"
+          >
+            {sincronizando ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3" />
+            )}
+            Sincronizar Autos
+          </button>
+        </div>
       )}
 
       {documentos.length === 0 ? (
