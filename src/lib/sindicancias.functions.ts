@@ -5,6 +5,7 @@ import {
   type DadoSindicado,
   type Juntada,
   type Sindicancia,
+  type StatusPeca,
 } from "./pecas";
 import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
 import { carregar, novaVersao } from "./sindicancias.server";
@@ -120,11 +121,12 @@ async function sincronizarDocumentoJuntada(
   const doc = existente
     ? await updateDocContent(existente.documentId, conteudo)
     : await createDoc(tituloDoc, conteudo, atual.pastaId);
+  const agora = new Date().toISOString();
 
   atual.documentos = existente
     ? atual.documentos.map((d) =>
         d.documentId === existente.documentId
-          ? { ...d, titulo: tituloDoc, tituloInterno, texto: conteudo }
+          ? { ...d, titulo: tituloDoc, tituloInterno, texto: conteudo, atualizadoEm: agora }
           : d,
       )
     : [
@@ -136,6 +138,9 @@ async function sincronizarDocumentoJuntada(
           pecaId,
           tituloInterno,
           texto: conteudo,
+          status: "juntada-aos-autos",
+          criadoEm: agora,
+          atualizadoEm: agora,
         },
       ];
 
@@ -282,6 +287,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     let lista = [...atual.documentos];
     let doc: { documentId: string; url: string; embedUrl: string };
     let pos: number;
+    const agora = new Date().toISOString();
 
     if (existenteAtivo) {
       // Guarda o texto que estava no documento antes de sobrescrever, para permitir restaurar.
@@ -303,6 +309,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
               titulo: data.titulo,
               versoes: novaVersao(d.versoes, anterior, data.conteudo),
               texto: data.conteudo,
+              atualizadoEm: agora,
             }
           : d,
       );
@@ -317,6 +324,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
         pecaId: data.pecaId,
         versoes: existenteBruto.versoes,
         texto: data.conteudo,
+        status: existenteBruto.status ?? "concluida",
+        criadoEm: existenteBruto.criadoEm ?? agora,
+        atualizadoEm: agora,
       };
     } else {
       doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
@@ -328,6 +338,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
         url: doc.url,
         pecaId: data.pecaId,
         texto: data.conteudo,
+        status: "concluida",
+        criadoEm: agora,
+        atualizadoEm: agora,
       });
     }
     atual.documentos = lista;
@@ -670,4 +683,50 @@ export const sincronizarAutos = createServerFn({ method: "POST" })
     await updateRow(linha, sindicanciaToRow(atual));
 
     return { autosUrl: atual.autosUrl, autosDocId: atual.autosDocId, totalPecas: pecas.length };
+  });
+
+/**
+ * Altera a situação de controle de uma peça já lançada nos autos (Prioridade 2.3) sem
+ * precisar abrir o Google Docs — é só 1 gravação na planilha; o Google Docs em si nem é
+ * tocado (o status é metadado do índice, não faz parte do conteúdo do documento).
+ */
+export const atualizarStatusPeca = createServerFn({ method: "POST" })
+  .inputValidator((data: { sindicanciaId: string; documentId: string; status: StatusPeca }) => data)
+  .handler(async ({ data }) => {
+    const { updateRow } = await import("./google.server");
+    const { atual, linha } = await carregar(data.sindicanciaId);
+
+    const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
+    if (!alvo) throw new Error("Peça não encontrada nos autos.");
+
+    atual.documentos = atual.documentos.map((d) =>
+      d.documentId === data.documentId ? { ...d, status: data.status } : d,
+    );
+
+    await updateRow(linha, sindicanciaToRow(atual));
+    return { documentId: data.documentId, status: data.status };
+  });
+
+/**
+ * Reordena as peças no índice dos autos (Prioridade 2.2 — arrastar/mover). Só grava a nova
+ * ordem na planilha; NÃO repagina o Google Docs (a repaginação real acontece à parte, em
+ * sincronizarAutos, para não disparar uma reconstrução cara a cada arrasto).
+ */
+export const reordenarPecas = createServerFn({ method: "POST" })
+  .inputValidator((data: { sindicanciaId: string; ordem: string[] }) => data)
+  .handler(async ({ data }) => {
+    const { updateRow } = await import("./google.server");
+    const { atual, linha } = await carregar(data.sindicanciaId);
+
+    const porId = new Map(atual.documentos.map((d) => [d.documentId, d]));
+    const reordenados = data.ordem
+      .map((id) => porId.get(id))
+      .filter((d): d is (typeof atual.documentos)[number] => Boolean(d));
+    // Segurança: qualquer documento que não veio na lista de ordem (ex.: criado em outra
+    // aba entre o carregamento e o clique) entra no fim, em vez de ser descartado.
+    const faltantes = atual.documentos.filter((d) => !data.ordem.includes(d.documentId));
+    atual.documentos = [...reordenados, ...faltantes];
+
+    await updateRow(linha, sindicanciaToRow(atual));
+    return { total: atual.documentos.length };
   });
