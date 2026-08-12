@@ -104,8 +104,6 @@ async function sincronizarDocumentoJuntada(
     formatarPecaBasica,
     inserirAnexoNoFimDoDocumento,
     ensureAutosDoc,
-    rebuildAutos,
-    getDocText,
   } = await import("./google.server");
 
   const juntada = atual.juntadas.find((j) => j.id === juntadaId);
@@ -165,43 +163,17 @@ async function sincronizarDocumentoJuntada(
     console.warn("Falha ao incorporar anexos na juntada:", e);
   }
 
+  // Prioridade 1.7: já não reconstrói os autos aqui a cada juntada salva/anexo enviado —
+  // só garante que o documento único exista (ensureAutosDoc é idempotente e, depois da 1ª
+  // vez, é só 1 checagem barata) para o link "Autos" continuar disponível. O conteúdo em si
+  // é reconstruído à parte por sincronizarAutos, enfileirado pelo cliente (ver syncQueue.ts)
+  // logo após esta chamada, ou disparado manualmente em "Sincronizar Autos".
   try {
     const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
     atual.autosDocId = autos.documentId;
     atual.autosUrl = autos.url;
-
-    const pecas: {
-      pecaId?: string;
-      titulo: string;
-      tituloInterno?: string;
-      texto: string;
-      anexos?: AnexoJuntada[];
-    }[] = [];
-    for (const d of atual.documentos) {
-      const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-        ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-        : undefined;
-      if (d.documentId === doc.documentId) {
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: conteudo,
-          anexos: juntadaDoItem?.anexos,
-        });
-      } else {
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: d.texto ?? (await getDocText(d.documentId)),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-    }
-    await rebuildAutos(autos.documentId, pecas);
   } catch (e) {
-    console.warn("Falha ao atualizar o documento único dos autos:", e);
+    console.warn("Falha ao garantir o documento único dos autos:", e);
   }
 
   return atual;
@@ -273,7 +245,6 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       ensureAutosDoc,
       ensureSindicanciaFolders,
       arquivoAtivo,
-      rebuildAutos,
       getDocText,
       formatarPecaBasica,
     } = await import("./google.server");
@@ -375,39 +346,19 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       atual.etapas = [...atual.etapas, data.etapa];
     }
 
-    // Documento único paginado.
+    // Prioridade 1.7: já não reconstrói o documento único a cada peça salva — só garante que
+    // ele exista (ensureAutosDoc é idempotente e, depois da 1ª vez, é só 1 checagem barata)
+    // para o link "Autos" continuar disponível. O conteúdo em si é reconstruído à parte por
+    // sincronizarAutos, enfileirado pelo cliente (ver syncQueue.ts) logo após esta exportação,
+    // ou disparado manualmente pelo usuário em "Sincronizar Autos".
     let autosUrl = atual.autosUrl;
     try {
       const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
       atual.autosDocId = autos.documentId;
       atual.autosUrl = autos.url;
       autosUrl = autos.url;
-
-      const pecas: {
-        pecaId?: string;
-        titulo: string;
-        tituloInterno?: string;
-        texto: string;
-        anexos?: AnexoJuntada[];
-      }[] = [];
-      for (const d of lista) {
-        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-          : undefined;
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto:
-            d.documentId === doc.documentId
-              ? data.conteudo
-              : (d.texto ?? (await getDocText(d.documentId))),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-      await rebuildAutos(autos.documentId, pecas);
     } catch (e) {
-      console.warn("Falha ao atualizar o documento único dos autos:", e);
+      console.warn("Falha ao garantir o documento único dos autos:", e);
     }
 
     try {
@@ -557,8 +508,7 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
 export const desfazerInsercao = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string; documentId: string; etapa?: string }) => data)
   .handler(async ({ data }) => {
-    const { updateRow, ensureAutosDoc, rebuildAutos, getDocText, moverParaLixeira } =
-      await import("./google.server");
+    const { updateRow, ensureAutosDoc, moverParaLixeira } = await import("./google.server");
 
     const { atual, linha } = await carregar(data.sindicanciaId);
     const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
@@ -578,32 +528,15 @@ export const desfazerInsercao = createServerFn({ method: "POST" })
       console.warn("Falha ao mover o documento individual para a lixeira:", e);
     }
 
+    // Prioridade 1.7: a repaginação do documento único não roda mais aqui — fica pendente
+    // até sincronizarAutos rodar (enfileirado pelo cliente logo após o desfazer, ou disparado
+    // manualmente). Só garante que o documento único continue existindo/vinculado.
     try {
       const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
       atual.autosDocId = autos.documentId;
       atual.autosUrl = autos.url;
-      const pecas: {
-        pecaId?: string;
-        titulo: string;
-        tituloInterno?: string;
-        texto: string;
-        anexos?: AnexoJuntada[];
-      }[] = [];
-      for (const d of atual.documentos) {
-        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-          : undefined;
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto: d.texto ?? (await getDocText(d.documentId)),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-      await rebuildAutos(autos.documentId, pecas);
     } catch (e) {
-      console.warn("Falha ao reconstruir o documento único após desfazer:", e);
+      console.warn("Falha ao garantir o documento único dos autos:", e);
     }
 
     await updateRow(linha, sindicanciaToRow(atual));
@@ -629,14 +562,8 @@ export const restaurarVersao = createServerFn({ method: "POST" })
       data,
   )
   .handler(async ({ data }) => {
-    const {
-      updateDocContent,
-      updateRow,
-      ensureAutosDoc,
-      rebuildAutos,
-      getDocText,
-      formatarPecaBasica,
-    } = await import("./google.server");
+    const { updateDocContent, updateRow, ensureAutosDoc, getDocText, formatarPecaBasica } =
+      await import("./google.server");
 
     const { atual, linha } = await carregar(data.sindicanciaId);
     const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
@@ -674,35 +601,15 @@ export const restaurarVersao = createServerFn({ method: "POST" })
         : d,
     );
 
+    // Prioridade 1.7: a repaginação do documento único não roda mais aqui — fica pendente
+    // até sincronizarAutos rodar (enfileirado pelo cliente logo após restaurar, ou disparado
+    // manualmente). Só garante que o documento único continue existindo/vinculado.
     try {
       const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
       atual.autosDocId = autos.documentId;
       atual.autosUrl = autos.url;
-      const pecas: {
-        pecaId?: string;
-        titulo: string;
-        tituloInterno?: string;
-        texto: string;
-        anexos?: AnexoJuntada[];
-      }[] = [];
-      for (const d of atual.documentos) {
-        const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-          ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-          : undefined;
-        pecas.push({
-          pecaId: d.pecaId,
-          titulo: d.titulo,
-          tituloInterno: d.tituloInterno,
-          texto:
-            d.documentId === data.documentId
-              ? versao.texto
-              : (d.texto ?? (await getDocText(d.documentId))),
-          anexos: juntadaDoItem?.anexos,
-        });
-      }
-      await rebuildAutos(autos.documentId, pecas);
     } catch (e) {
-      console.warn("Falha ao reconstruir o documento único após restaurar a versão:", e);
+      console.warn("Falha ao garantir o documento único dos autos:", e);
     }
 
     try {
@@ -712,4 +619,55 @@ export const restaurarVersao = createServerFn({ method: "POST" })
     }
 
     return { texto: versao.texto, avisoFormatacao };
+  });
+
+/**
+ * Reconstrói o documento único dos autos (repagina "Fls. N", reaplica formatação) a partir
+ * do estado atual salvo na planilha — Prioridade 1.7/1.8 da evolução do sistema.
+ *
+ * Antes, essa reconstrução rodava embutida (e duplicada 4x, com pequenas variações) dentro
+ * de exportarParaDocs, sincronizarDocumentoJuntada, desfazerInsercao e restaurarVersao —
+ * disparando a cada peça/juntada salva, com custo crescendo linearmente com o total de
+ * peças já lançadas nos autos. Agora é uma operação própria, separada: as 4 funções acima
+ * só marcam o documento único como existente (ensureAutosDoc) e devolvem o controle; quem
+ * decide QUANDO reconstruir de fato é o cliente — via a fila de sincronização
+ * (src/lib/syncQueue.ts), que enfileira esta função automaticamente logo após qualquer
+ * alteração relevante (com deduplicação: várias alterações em sequência viram 1 única
+ * reconstrução) e que também pode ser disparada manualmente pelo botão "Sincronizar Autos".
+ */
+export const sincronizarAutos = createServerFn({ method: "POST" })
+  .inputValidator((data: { sindicanciaId: string }) => data)
+  .handler(async ({ data }) => {
+    const { ensureAutosDoc, rebuildAutos, getDocText, updateRow } = await import("./google.server");
+
+    const { atual, linha } = await carregar(data.sindicanciaId);
+
+    const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+    atual.autosDocId = autos.documentId;
+    atual.autosUrl = autos.url;
+
+    const pecas: {
+      pecaId?: string;
+      titulo: string;
+      tituloInterno?: string;
+      texto: string;
+      anexos?: AnexoJuntada[];
+    }[] = [];
+    for (const d of atual.documentos) {
+      const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+        ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+        : undefined;
+      pecas.push({
+        pecaId: d.pecaId,
+        titulo: d.titulo,
+        tituloInterno: d.tituloInterno,
+        texto: d.texto ?? (await getDocText(d.documentId)),
+        anexos: juntadaDoItem?.anexos,
+      });
+    }
+    await rebuildAutos(autos.documentId, pecas);
+
+    await updateRow(linha, sindicanciaToRow(atual));
+
+    return { autosUrl: atual.autosUrl, autosDocId: atual.autosDocId, totalPecas: pecas.length };
   });
