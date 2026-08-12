@@ -17,6 +17,13 @@ import { GuiaDocumento } from "@/components/GuiaDocumento";
 import { PECAS, RODAPE_DIEX_OPCOES, gerarPeca, type PecaCampos, type PecaId } from "@/lib/pecas";
 
 export const Route = createFileRoute("/pecas")({
+  validateSearch: (search: Record<string, unknown>): { peca?: PecaId | "juntada" } => ({
+    peca:
+      typeof search.peca === "string" &&
+      (search.peca === "juntada" || PECAS.some((p) => p.id === search.peca))
+        ? (search.peca as PecaId | "juntada")
+        : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Gerador de Peças Jurídico-Administrativas | Sindicâncias EB" },
@@ -229,7 +236,10 @@ const NOTA_POR_PECA: Partial<Record<PecaId, string>> = {
 
 function Pecas() {
   const { itens, selecionada, setSelecionadaId, recarregar } = useSindicancias();
-  const [peca, setPeca] = useState<PecaId | "juntada">("abertura");
+  // Prioridade 2.5 — "Editar peça" no índice dos autos leva pra cá já com a peça certa
+  // pré-selecionada, via ?peca=<id> (ver validateSearch acima e o botão em documentos.tsx).
+  const buscaUrl = Route.useSearch();
+  const [peca, setPeca] = useState<PecaId | "juntada">(buscaUrl.peca ?? "abertura");
   const [campos, setCampos] = useState<PecaCampos>(camposVazios);
   const [texto, setTexto] = useState("");
 
