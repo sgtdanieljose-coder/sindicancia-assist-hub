@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, FileUp, History, Loader2, RotateCcw, Undo2 } from "lucide-react";
+import { Check, ExternalLink, FileUp, History, Loader2, RotateCcw, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -20,12 +20,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  desfazerInsercao,
-  exportarParaDocs,
-  listarVersoes,
-  restaurarVersao,
-} from "@/lib/sindicancias.functions";
+import { desfazerInsercao, listarVersoes, restaurarVersao } from "@/lib/sindicancias.functions";
+import { salvarRascunho, chaveRascunho } from "@/lib/localStore";
+import { useStatusSincronizacao, useSyncQueue, alvoPeca } from "@/hooks/useSyncQueue";
+
+/** Formato devolvido por exportarParaDocs (ver sindicancias.functions.ts) — repetido aqui
+ *  porque a exportação agora passa pela fila (useSyncQueue), que carrega o resultado como
+ *  `unknown` até o ponto de consumo. */
+type ResultadoExportar = {
+  documentId: string;
+  url: string;
+  embedUrl: string;
+  posicao: number;
+  autosUrl?: string;
+  atualizado: boolean;
+  recriado: boolean;
+  avisoFormatacao?: string;
+};
 
 type Props = {
   titulo: string;
@@ -38,7 +49,6 @@ type Props = {
   onChange: (texto: string) => void;
   onExportado?: () => void;
 };
-
 
 export function EditorPeca({
   titulo,
@@ -82,22 +92,66 @@ export function EditorPeca({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existente?.documentId]);
 
-  const exportar = useMutation({
-    mutationFn: (pos?: number) =>
-      exportarParaDocs({
-        data: { sindicanciaId, titulo, conteudo, posicao: pos, pecaId, unica, etapa },
-      }),
-    onSuccess: (d) => {
+  // ------------------------------------------------------------------------------------
+  // Prioridade 1.1 — "Salvar" local: grava o rascunho no IndexedDB (debounce de 600ms)
+  // toda vez que o texto muda, sem depender do Google. É só uma rede de segurança contra
+  // perda de conteúdo (ex.: aba fechada sem querer); a fonte de verdade em tela continua
+  // sendo o estado do componente pai (routes/pecas.tsx) — restaurar esse rascunho
+  // automaticamente é um próximo passo, a decidir junto com o fluxo de regeneração do
+  // template a partir dos campos.
+  // ------------------------------------------------------------------------------------
+  const [statusLocal, setStatusLocal] = useState<"salvo" | "salvando">("salvo");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const primeiraRenderizacao = useRef(true);
+
+  useEffect(() => {
+    if (primeiraRenderizacao.current) {
+      primeiraRenderizacao.current = false;
+      return;
+    }
+    if (!pecaId) return;
+    setStatusLocal("salvando");
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      void salvarRascunho({
+        chave: chaveRascunho(sindicanciaId, pecaId),
+        sindicanciaId,
+        pecaId,
+        texto: conteudo,
+        atualizadoEm: new Date().toISOString(),
+      }).then(() => setStatusLocal("salvo"));
+    }, 600);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [conteudo, sindicanciaId, pecaId]);
+
+  // ------------------------------------------------------------------------------------
+  // Prioridade 1.2/1.3/1.7 — "Sincronizar": exportar para o Google Docs passa pela fila de
+  // sincronização em vez de uma mutação direta. Isso dá retry com backoff automático (ex.:
+  // erro 429 de quota) e evita disparar duas exportações da mesma peça em paralelo se o
+  // usuário clicar mais de uma vez.
+  // ------------------------------------------------------------------------------------
+  const { enfileirarExportarPeca, enfileirarSincronizarAutos } = useSyncQueue();
+  const alvoExportacao = alvoPeca(sindicanciaId, pecaId);
+  const statusExportacao = useStatusSincronizacao(alvoExportacao);
+  const ultimoResultadoTratado = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!statusExportacao || statusExportacao.atualizadoEm === ultimoResultadoTratado.current) {
+      return;
+    }
+    if (statusExportacao.status === "completed") {
+      ultimoResultadoTratado.current = statusExportacao.atualizadoEm;
+      const d = statusExportacao.resultado as ResultadoExportar;
       setDoc(d);
       setAutosUrl(d.autosUrl ?? null);
       setPerguntando(false);
       // Só é possível desfazer uma inserção nova — atualizações não criam folha adicional.
-      setUltimaInsercao(
-        d.atualizado ? null : { documentId: d.documentId, posicao: d.posicao },
-      );
+      setUltimaInsercao(d.atualizado ? null : { documentId: d.documentId, posicao: d.posicao });
       toast.success(
         d.atualizado
-          ? `Peça atualizada (Fls. ${d.posicao}) — documento individual e autos sincronizados`
+          ? `Peça atualizada (Fls. ${d.posicao}) — documento individual sincronizado`
           : d.recriado
             ? `O documento anterior não foi encontrado no Drive — recriado na Fls. ${d.posicao}`
             : `Peça salva individualmente e inserida na página ${d.posicao} dos autos`,
@@ -106,9 +160,23 @@ export function EditorPeca({
         toast.warning(`Documento salvo, mas a formatação falhou: ${d.avisoFormatacao}`);
       }
       onExportado?.();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+      // Os autos ficam desatualizados após qualquer peça exportada — enfileira a
+      // reconstrução do consolidado à parte (dedupe: N exportações seguidas = 1 rebuild).
+      enfileirarSincronizarAutos({ sindicanciaId });
+    } else if (statusExportacao.status === "failed") {
+      ultimoResultadoTratado.current = statusExportacao.atualizadoEm;
+      toast.error(statusExportacao.erro ?? "Falha ao sincronizar com o Google Docs.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusExportacao]);
+
+  const exportando =
+    statusExportacao?.status === "processing" || statusExportacao?.status === "retrying";
+
+  const exportar = (pos?: number) => {
+    enfileirarExportarPeca({ sindicanciaId, titulo, conteudo, posicao: pos, pecaId, unica, etapa });
+    setPerguntando(false);
+  };
 
   const desfazer = useMutation({
     mutationFn: (documentId: string) =>
@@ -116,7 +184,10 @@ export function EditorPeca({
     onSuccess: () => {
       setUltimaInsercao(null);
       setDoc(null);
-      toast.success("Inserção desfeita — os autos foram repaginados e a peça foi removida.");
+      toast.success(
+        "Inserção desfeita — os autos foram removidos e ficam pendentes de sincronizar.",
+      );
+      enfileirarSincronizarAutos({ sindicanciaId });
       onExportado?.();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -141,10 +212,13 @@ export function EditorPeca({
       onChange(d.texto);
       setHistoricoAberto(false);
       void versoes.refetch();
-      toast.success("Versão anterior restaurada — peça e autos atualizados.");
+      toast.success(
+        "Versão anterior restaurada — peça atualizada, autos pendentes de sincronizar.",
+      );
       if (d.avisoFormatacao) {
         toast.warning(`Texto restaurado, mas a formatação falhou: ${d.avisoFormatacao}`);
       }
+      enfileirarSincronizarAutos({ sindicanciaId });
       onExportado?.();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -154,7 +228,7 @@ export function EditorPeca({
 
   const acionar = () => {
     if (existente) {
-      exportar.mutate(undefined);
+      exportar(undefined);
     } else {
       setPosicao(String(total));
       setPerguntando(true);
@@ -164,7 +238,11 @@ export function EditorPeca({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="rotulo">Minuta gerada — revise antes de exportar</p>
+        <div className="flex items-center gap-2">
+          <p className="rotulo">Minuta gerada — revise antes de exportar</p>
+          <StatusLocalBadge status={statusLocal} />
+          <StatusSincronizacaoBadge status={statusExportacao?.status} />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {documentIdAtual && (
             <Button
@@ -180,8 +258,8 @@ export function EditorPeca({
               {listaVersoes.length > 0 ? ` (${listaVersoes.length})` : ""}
             </Button>
           )}
-          <Button onClick={acionar} disabled={exportar.isPending || !conteudo.trim()} size="sm">
-            {exportar.isPending ? (
+          <Button onClick={acionar} disabled={exportando || !conteudo.trim()} size="sm">
+            {exportando ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <FileUp className="size-4" />
@@ -242,7 +320,6 @@ export function EditorPeca({
         </DialogContent>
       </Dialog>
 
-
       {ultimaInsercao && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
@@ -265,8 +342,6 @@ export function EditorPeca({
           </Button>
         </div>
       )}
-
-
 
       {existente && (
         <p className="text-xs text-muted-foreground">
@@ -316,8 +391,8 @@ export function EditorPeca({
             <Button variant="outline" onClick={() => setPerguntando(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => exportar.mutate(Number(posicao))} disabled={exportar.isPending}>
-              {exportar.isPending && <Loader2 className="size-4 animate-spin" />}
+            <Button onClick={() => exportar(Number(posicao))} disabled={exportando}>
+              {exportando && <Loader2 className="size-4 animate-spin" />}
               Confirmar e exportar
             </Button>
           </DialogFooter>
@@ -362,4 +437,40 @@ export function EditorPeca({
       )}
     </div>
   );
+}
+
+/** Indicador do "Salvar" local (Prioridade 1.1) — instantâneo, nunca depende do Google. */
+function StatusLocalBadge({ status }: { status: "salvo" | "salvando" }) {
+  if (status === "salvando") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+        <Loader2 className="size-3 animate-spin" /> Salvando...
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      <Check className="size-3 text-green-600" /> Salvo
+    </span>
+  );
+}
+
+/** Indicador do "Sincronizar" com o Google Docs (Prioridade 1.2/1.8) — reflete o status da
+ *  operação na fila (ver useSyncQueue). Ausente = ainda não foi exportado nesta sessão. */
+function StatusSincronizacaoBadge({
+  status,
+}: {
+  status?: "pending" | "processing" | "completed" | "failed" | "retrying";
+}) {
+  if (!status) return null;
+  const mapa: Record<string, { texto: string; className: string }> = {
+    pending: { texto: "🟡 Alterações pendentes", className: "text-amber-600" },
+    processing: { texto: "🔄 Sincronizando...", className: "text-muted-foreground" },
+    retrying: { texto: "🔄 Tentando novamente...", className: "text-amber-600" },
+    completed: { texto: "🟢 Sincronizado", className: "text-green-600" },
+    failed: { texto: "🔴 Erro de sincronização", className: "text-destructive" },
+  };
+  const info = mapa[status];
+  if (!info) return null;
+  return <span className={`text-[11px] ${info.className}`}>{info.texto}</span>;
 }
