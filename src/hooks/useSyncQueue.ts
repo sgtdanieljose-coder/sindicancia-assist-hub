@@ -30,13 +30,16 @@ export function useSyncQueue() {
   const fila = useSyncExternalStore(filaSync.subscribe, filaSync.obterInstantaneo, () => []);
 
   const enfileirarExportarPeca = useCallback(
-    (payload: PayloadExportarPeca, prioridade?: number) =>
+    (
+      payload: PayloadExportarPeca,
+      opcoes?: { documentId?: string; prioridade?: number },
+    ) =>
       filaSync.enfileirar({
         tipo: "exportarPeca",
-        alvo: alvoPeca(payload.sindicanciaId, payload.pecaId),
+        alvo: alvoPeca(payload.sindicanciaId, opcoes?.documentId, payload.pecaId),
         sindicanciaId: payload.sindicanciaId,
         payload,
-        prioridade,
+        prioridade: opcoes?.prioridade,
       }),
     [],
   );
