@@ -684,6 +684,7 @@ function Documentos() {
           pecaId={pecaAberta.pecaId}
           aberto={historicoAberto}
           onOpenChange={setHistoricoAberto}
+          textoAtual={pecaAberta.texto}
           onAtualizado={recarregar}
         />
       )}
