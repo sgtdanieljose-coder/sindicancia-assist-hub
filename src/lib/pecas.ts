@@ -10,6 +10,21 @@ export type AnexoJuntada = {
   /** Documento (folha própria) deste anexo específico, se houver arquivo. */
   documentId?: string;
   docUrl?: string;
+  /** Tamanho do arquivo em bytes, no momento do envio (Prioridade 4.3). Ausente em anexos
+   *  enviados antes desta mudança. */
+  tamanho?: number;
+  /** Quando o upload deste anexo foi concluído. Ausente em anexos enviados antes desta
+   *  mudança. */
+  criadoEm?: string;
+};
+
+/** Situação de uma juntada — Prioridade 4.0: "aberta" enquanto ainda recebe anexos,
+ *  "concluida" quando o usuário sinaliza que terminou de montá-la. */
+export const STATUS_JUNTADA = ["aberta", "concluida"] as const;
+export type StatusJuntada = (typeof STATUS_JUNTADA)[number];
+export const STATUS_JUNTADA_LABEL: Record<StatusJuntada, string> = {
+  aberta: "Aberta",
+  concluida: "Concluída",
 };
 
 export type Juntada = {
@@ -30,6 +45,12 @@ export type Juntada = {
    * usar a lista automática (gerarTextoJuntada).
    */
   textoEditado?: string;
+  /** Quem é responsável por esta juntada (texto livre — não há autenticação no sistema
+   *  para vincular um usuário de verdade). Prioridade 4.0. */
+  responsavel?: string;
+  /** Prioridade 4.0/2.3. Ausente em juntadas criadas antes desta mudança — tratar como
+   *  "aberta". */
+  status?: StatusJuntada;
 };
 
 /** Snapshot do texto de uma peça, guardado a cada exportação/atualização. */
