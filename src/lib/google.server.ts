@@ -842,7 +842,10 @@ function requestsCorpoJustificado(paragrafos: Paragrafo[], titulo: string): unkn
           startIndex: naoVazios[i].startIndex,
           endIndex: naoVazios[i].startIndex + texto.length,
         },
-        paragraphStyle: { alignment: "JUSTIFIED", indentFirstLine: { magnitude: RECUO_PRIMEIRA_LINHA_PT, unit: "PT" } },
+        paragraphStyle: {
+          alignment: "JUSTIFIED",
+          indentFirstLine: { magnitude: RECUO_PRIMEIRA_LINHA_PT, unit: "PT" },
+        },
         fields: "alignment,indentFirstLine",
       },
     });
@@ -1296,16 +1299,18 @@ export async function rebuildAutos(
   }
 }
 
-/** Envia um anexo (base64) para a subpasta "Anexos" da sindicância. */
+/** Envia um anexo para a subpasta "Anexos" da sindicância — recebe os bytes já decodificados
+ *  (Prioridade 4.2: o cliente manda o arquivo via FormData, não mais como string base64, então
+ *  não há conversão nenhuma para desfazer aqui). */
 export async function uploadAnexo(params: {
   nome: string;
   mimeType: string;
-  base64: string;
+  bytes: Uint8Array;
   pastaId: string;
 }) {
   const boundary = `lovable${Date.now()}`;
   const metadata = JSON.stringify({ name: params.nome, parents: [params.pastaId] });
-  const bin = Uint8Array.from(atob(params.base64), (ch) => ch.charCodeAt(0));
+  const bin = params.bytes;
 
   const encoder = new TextEncoder();
   const head = encoder.encode(
