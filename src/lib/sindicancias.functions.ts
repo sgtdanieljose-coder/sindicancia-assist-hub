@@ -6,6 +6,7 @@ import {
   type Juntada,
   type Sindicancia,
   type StatusPeca,
+  type StatusJuntada,
 } from "./pecas";
 import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
 import { carregar, novaVersao } from "./sindicancias.server";
@@ -394,7 +395,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
  *  Doc (termo + lista de anexos), já inserido no documento único dos autos. Pode ser chamada
  *  quantas vezes forem necessárias — cada sindicância pode ter várias juntadas. */
 export const criarJuntada = createServerFn({ method: "POST" })
-  .inputValidator((data: { sindicanciaId: string; titulo: string; data: string }) => data)
+  .inputValidator(
+    (data: { sindicanciaId: string; titulo: string; data: string; responsavel?: string }) => data,
+  )
   .handler(async ({ data }) => {
     const { updateRow } = await import("./google.server");
     const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
@@ -406,6 +409,8 @@ export const criarJuntada = createServerFn({ method: "POST" })
       titulo: data.titulo || `Juntada nº ${numero}`,
       data: data.data || new Date().toISOString().slice(0, 10),
       anexos: [],
+      responsavel: data.responsavel || undefined,
+      status: "aberta",
     };
     atual.juntadas = [...(atual.juntadas ?? []), juntada];
     atual.documentos = atual.documentos ?? [];
@@ -417,17 +422,22 @@ export const criarJuntada = createServerFn({ method: "POST" })
   });
 
 /**
- * Atualiza a data e/ou o texto editado manualmente de uma juntada já existente, e
- * ressincroniza o Google Doc dela (e os autos). Usada pela aba "Juntada de
- * Documentos" do Gerador Dinâmico de Peças — ao contrário de adicionarAnexo, não
- * exige nenhum arquivo: serve só para digitar/ajustar o texto dos itens juntados.
- * `textoEditado` vazio ("") faz a juntada voltar a usar a lista automática de
- * anexos (ver textoEfetivoJuntada em pecas.ts).
+ * Atualiza a data, o responsável, o status e/ou o texto editado manualmente de uma juntada
+ * já existente, e ressincroniza o Google Doc dela (e os autos). Usada pela aba "Juntada de
+ * Documentos" do Gerador Dinâmico de Peças e pelo índice dos autos — ao contrário de
+ * adicionarAnexo, não exige nenhum arquivo. `textoEditado` vazio ("") faz a juntada voltar
+ * a usar a lista automática de anexos (ver textoEfetivoJuntada em pecas.ts).
  */
 export const salvarJuntada = createServerFn({ method: "POST" })
   .inputValidator(
-    (data: { sindicanciaId: string; juntadaId: string; data?: string; textoEditado?: string }) =>
-      data,
+    (data: {
+      sindicanciaId: string;
+      juntadaId: string;
+      data?: string;
+      textoEditado?: string;
+      responsavel?: string;
+      status?: StatusJuntada;
+    }) => data,
   )
   .handler(async ({ data }) => {
     const { updateRow } = await import("./google.server");
@@ -440,6 +450,8 @@ export const salvarJuntada = createServerFn({ method: "POST" })
             ...j,
             data: data.data ?? j.data,
             textoEditado: data.textoEditado !== undefined ? data.textoEditado : j.textoEditado,
+            responsavel: data.responsavel !== undefined ? data.responsavel : j.responsavel,
+            status: data.status ?? j.status,
           }
         : j,
     );
@@ -452,20 +464,32 @@ export const salvarJuntada = createServerFn({ method: "POST" })
 
 /** Envia um anexo para a pasta "Anexos" do NUP, vincula-o a uma juntada e atualiza o Google
  *  Doc dela — fotos ficam incorporadas no texto, PDFs e demais tipos viram um link clicável. */
+/**
+ * Envia um anexo para a juntada — recebe FormData (Prioridade 4.2), não mais JSON com o
+ * arquivo em base64: o navegador manda o arquivo bruto (multipart/form-data), sem passar
+ * por FileReader/base64 no cliente nem por uma decodificação equivalente aqui no servidor.
+ * Campos esperados no FormData: sindicanciaId, juntadaId, descricao (opcional — usa o nome
+ * do arquivo se ausente) e arquivo (o File em si).
+ */
 export const adicionarAnexo = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: {
-      sindicanciaId: string;
-      juntadaId: string;
-      nome: string;
-      mimeType: string;
-      base64: string;
-    }) => data,
-  )
+  .inputValidator((data: FormData) => data)
   .handler(async ({ data }) => {
+    const sindicanciaId = String(data.get("sindicanciaId") ?? "");
+    const juntadaId = String(data.get("juntadaId") ?? "");
+    const arquivo = data.get("arquivo");
+    if (!sindicanciaId || !juntadaId) {
+      throw new Error("Sindicância ou juntada não informada.");
+    }
+    if (!(arquivo instanceof File)) {
+      throw new Error("Nenhum arquivo recebido.");
+    }
+    const descricao = String(data.get("descricao") ?? arquivo.name);
+    const mimeType = arquivo.type || "application/octet-stream";
+    const bytes = new Uint8Array(await arquivo.arrayBuffer());
+
     const { uploadAnexo, updateRow, ensureSindicanciaFolders, arquivoAtivo } =
       await import("./google.server");
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    const { atual: atualInicial, linha } = await carregar(sindicanciaId);
     let atual = atualInicial;
 
     let anexosId = atual.anexosId;
@@ -481,36 +505,39 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
       throw new Error("Não foi possível localizar ou criar a pasta de anexos no Drive.");
     }
 
-    const arquivo = await uploadAnexo({
-      nome: data.nome,
-      mimeType: data.mimeType,
-      base64: data.base64,
+    const enviado = await uploadAnexo({
+      nome: arquivo.name,
+      mimeType,
+      bytes,
       pastaId: anexosId,
     });
 
+    const agora = new Date().toISOString();
     atual.juntadas = (atual.juntadas ?? []).map((j) =>
-      j.id === data.juntadaId
+      j.id === juntadaId
         ? {
             ...j,
             anexos: [
               ...j.anexos,
               {
                 id: `ANX-${Date.now()}`,
-                descricao: data.nome,
-                fileId: arquivo.fileId,
-                url: arquivo.url,
-                mimeType: arquivo.mimeType,
-                nomeArquivo: arquivo.nome,
+                descricao,
+                fileId: enviado.fileId,
+                url: enviado.url,
+                mimeType: enviado.mimeType,
+                nomeArquivo: enviado.nome,
+                tamanho: bytes.length,
+                criadoEm: agora,
               } satisfies AnexoJuntada,
             ],
           }
         : j,
     );
 
-    atual = await sincronizarDocumentoJuntada(atual, data.juntadaId);
+    atual = await sincronizarDocumentoJuntada(atual, juntadaId);
 
     await updateRow(linha, sindicanciaToRow(atual));
-    return arquivo;
+    return enviado;
   });
 
 /**
