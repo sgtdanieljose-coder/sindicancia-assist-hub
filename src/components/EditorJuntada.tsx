@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, Loader2, Paperclip, Plus, Save } from "lucide-react";
+import { ExternalLink, Loader2, Plus, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,18 +13,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { adicionarAnexo, criarJuntada, salvarJuntada } from "@/lib/sindicancias.functions";
-import { textoEfetivoJuntada, type Sindicancia } from "@/lib/pecas";
+import { criarJuntada, salvarJuntada } from "@/lib/sindicancias.functions";
+import {
+  textoEfetivoJuntada,
+  STATUS_JUNTADA,
+  STATUS_JUNTADA_LABEL,
+  type Sindicancia,
+  type StatusJuntada,
+} from "@/lib/pecas";
 import { useSyncQueue } from "@/hooks/useSyncQueue";
-
-function lerArquivo(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
-    reader.readAsDataURL(file);
-  });
-}
+import { SeletorAnexos } from "@/components/SeletorAnexos";
 
 /**
  * Gerencia as juntadas de uma sindicância dentro do Gerador Dinâmico de Peças —
@@ -47,7 +45,7 @@ export function EditorJuntada({
   const [novoTitulo, setNovoTitulo] = useState("");
   const [dataJuntada, setDataJuntada] = useState(new Date().toISOString().slice(0, 10));
   const [texto, setTexto] = useState("");
-  const [arquivo, setArquivo] = useState<File | null>(null);
+  const [responsavel, setResponsavel] = useState("");
 
   const juntadaAtual = juntadas.find((j) => j.id === juntadaId);
 
@@ -63,6 +61,7 @@ export function EditorJuntada({
     if (!juntadaAtual) return;
     setDataJuntada(juntadaAtual.data);
     setTexto(textoEfetivoJuntada(sindicancia, juntadaAtual));
+    setResponsavel(juntadaAtual.responsavel ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [juntadaAtual?.id, juntadaAtual?.textoEditado, juntadaAtual?.anexos.length]);
 
@@ -89,6 +88,7 @@ export function EditorJuntada({
           juntadaId,
           data: dataJuntada,
           textoEditado: texto,
+          responsavel,
         },
       }),
     onSuccess: () => {
@@ -99,27 +99,10 @@ export function EditorJuntada({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const enviar = useMutation({
-    mutationFn: async () => {
-      if (!arquivo) throw new Error("Selecione um arquivo.");
-      if (!juntadaId) throw new Error("Selecione ou crie uma juntada primeiro.");
-      const base64 = await lerArquivo(arquivo);
-      return adicionarAnexo({
-        data: {
-          sindicanciaId: sindicancia.id,
-          juntadaId,
-          nome: arquivo.name,
-          mimeType: arquivo.type || "application/octet-stream",
-          base64,
-        },
-      });
-    },
-    onSuccess: () => {
-      toast.success("Anexo enviado — autos pendentes de sincronizar");
-      setArquivo(null);
-      enfileirarSincronizarAutos({ sindicanciaId: sindicancia.id });
-      onAtualizado();
-    },
+  const atualizarStatusJuntada = useMutation({
+    mutationFn: (status: StatusJuntada) =>
+      salvarJuntada({ data: { sindicanciaId: sindicancia.id, juntadaId, status } }),
+    onSuccess: () => onAtualizado(),
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -170,13 +153,41 @@ export function EditorJuntada({
 
       {juntadaAtual ? (
         <>
-          <div className="space-y-1.5">
-            <Label>Data da Peça</Label>
-            <Input
-              type="date"
-              value={dataJuntada}
-              onChange={(e) => setDataJuntada(e.target.value)}
-            />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label>Data da Peça</Label>
+              <Input
+                type="date"
+                value={dataJuntada}
+                onChange={(e) => setDataJuntada(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Responsável</Label>
+              <Input
+                value={responsavel}
+                onChange={(e) => setResponsavel(e.target.value)}
+                placeholder="Ex.: Cb Silva"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Status da juntada</Label>
+              <Select
+                value={juntadaAtual.status ?? "aberta"}
+                onValueChange={(v) => atualizarStatusJuntada.mutate(v as StatusJuntada)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_JUNTADA.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {STATUS_JUNTADA_LABEL[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -204,49 +215,16 @@ export function EditorJuntada({
           </Button>
 
           <div className="space-y-2 border-t border-border pt-4">
-            <Label>Adicionar imagem ou PDF aos autos</Label>
-            <Input
-              type="file"
-              accept="image/*,application/pdf"
-              onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
+            <Label>Anexos (imagens ou PDFs) desta juntada</Label>
+            <SeletorAnexos
+              sindicanciaId={sindicancia.id}
+              juntadaId={juntadaId}
+              anexosExistentes={juntadaAtual.anexos}
+              onEnviado={() => {
+                enfileirarSincronizarAutos({ sindicanciaId: sindicancia.id });
+                onAtualizado();
+              }}
             />
-            <p className="text-xs text-muted-foreground">
-              Fotos ficam incorporadas no documento da juntada; PDFs viram um link clicável.
-            </p>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => enviar.mutate()}
-              disabled={enviar.isPending || !arquivo}
-            >
-              {enviar.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Paperclip className="size-4" />
-              )}
-              Enviar anexo
-            </Button>
-
-            {juntadaAtual.anexos.length > 0 && (
-              <ul className="space-y-0.5 pt-1">
-                {juntadaAtual.anexos.map((a) => (
-                  <li key={a.fileId ?? a.id} className="truncate text-sm text-muted-foreground">
-                    {a.url ? (
-                      <a
-                        href={a.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:text-primary"
-                      >
-                        {a.descricao || a.nomeArquivo}
-                      </a>
-                    ) : (
-                      a.descricao
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
 
           {juntadaAtual.url && (
