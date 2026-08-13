@@ -257,8 +257,12 @@ class FilaSincronizacao {
  *  pela mesma fila, o que garante o processamento sequencial global. */
 export const filaSync = new FilaSincronizacao();
 
-export function alvoPeca(sindicanciaId: string, pecaId: string | undefined): string {
-  return `peca:${sindicanciaId}:${pecaId ?? "livre"}`;
+export function alvoPeca(
+  sindicanciaId: string,
+  documentId?: string,
+  pecaId?: string,
+): string {
+  return `peca:${sindicanciaId}:${documentId ?? pecaId ?? "livre"}`;
 }
 
 export function alvoAutos(sindicanciaId: string): string {
