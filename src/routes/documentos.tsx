@@ -78,14 +78,6 @@ export const Route = createFileRoute("/documentos")({
 
 type DocumentoItem = Sindicancia["documentos"][number];
 
-function lerArquivo(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
-    reader.readAsDataURL(file);
-  });
-}
 
 function tipoDoItem(d: DocumentoItem): string {
   if (d.pecaId?.startsWith("juntada-")) return "Juntada";
