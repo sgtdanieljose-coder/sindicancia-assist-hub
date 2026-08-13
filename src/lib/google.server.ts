@@ -8,6 +8,13 @@ const KEY_ENV: Record<Connector, string> = {
   google_drive: "GOOGLE_DRIVE_API_KEY",
 };
 
+/** Erros transitórios do gateway/Google (indisponibilidade momentânea ou excesso de
+ *  requisições) — vale a pena repetir a chamada em vez de estourar para a UI. */
+const STATUS_TRANSITORIO = new Set([408, 425, 429, 500, 502, 503, 504]);
+const TENTATIVAS = 4;
+
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function gw<T = unknown>(
   connector: Connector,
   path: string,
@@ -20,29 +27,61 @@ export async function gw<T = unknown>(
   }
 
   const qs = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
-  const res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
-    method: init.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${lovableKey}`,
-      "X-Connection-Api-Key": connKey,
-      "Content-Type": "application/json",
-    },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-  });
 
-  if (!res.ok) {
+  let ultimoErro: Error = new Error("Falha desconhecida ao chamar a API do Google.");
+
+  for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
+    let res: Response;
+    try {
+      res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
+        method: init.method ?? "GET",
+        headers: {
+          Authorization: `Bearer ${lovableKey}`,
+          "X-Connection-Api-Key": connKey,
+          "Content-Type": "application/json",
+        },
+        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      });
+    } catch (e) {
+      // Falha de rede (conexão resetada) — também é transitória.
+      ultimoErro = e instanceof Error ? e : new Error(String(e));
+      if (tentativa < TENTATIVAS) {
+        await esperar(400 * 2 ** (tentativa - 1));
+        continue;
+      }
+      throw new Error(
+        `Não foi possível falar com o Google agora (${ultimoErro.message}). Tente novamente em instantes.`,
+      );
+    }
+
+    if (res.ok) return (await res.json()) as T;
+
     const text = await res.text();
-    console.error(`Gateway ${connector} ${path} falhou [${res.status}]: ${text}`);
+    console.error(
+      `Gateway ${connector} ${path} falhou [${res.status}] (tentativa ${tentativa}/${TENTATIVAS}): ${text}`,
+    );
+
+    if (STATUS_TRANSITORIO.has(res.status) && tentativa < TENTATIVAS) {
+      await esperar(400 * 2 ** (tentativa - 1));
+      continue;
+    }
+
     if (res.status === 429) {
       throw new Error(
         "Limite de requisições do Google atingido momentaneamente. Aguarde alguns instantes e clique em Atualizar.",
       );
     }
+    if (STATUS_TRANSITORIO.has(res.status)) {
+      throw new Error(
+        "O Google está temporariamente indisponível. Aguarde alguns instantes e clique em Atualizar.",
+      );
+    }
     throw new Error(`Google API [${res.status}]: ${text.slice(0, 400)}`);
   }
 
-  return (await res.json()) as T;
+  throw ultimoErro;
 }
+
 
 /** Chamada crua ao gateway (usada em uploads multipart do Drive). */
 export async function gwRaw(
