@@ -38,16 +38,13 @@ import {
 } from "@/components/ui/select";
 import { useSindicancias } from "@/components/SindicanciaContext";
 import { HistoricoVersoesDialog } from "@/components/HistoricoVersoesDialog";
-import {
-  adicionarAnexo,
-  atualizarStatusPeca,
-  criarJuntada,
-  reordenarPecas,
-} from "@/lib/sindicancias.functions";
+import { SeletorAnexos } from "@/components/SeletorAnexos";
+import { atualizarStatusPeca, criarJuntada, reordenarPecas } from "@/lib/sindicancias.functions";
 import {
   PECAS,
   STATUS_PECA,
   STATUS_PECA_LABEL,
+  STATUS_JUNTADA_LABEL,
   type Sindicancia,
   type StatusPeca,
 } from "@/lib/pecas";
@@ -77,15 +74,6 @@ export const Route = createFileRoute("/documentos")({
 });
 
 type DocumentoItem = Sindicancia["documentos"][number];
-
-function lerArquivo(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
-    reader.readAsDataURL(file);
-  });
-}
 
 function tipoDoItem(d: DocumentoItem): string {
   if (d.pecaId?.startsWith("juntada-")) return "Juntada";
@@ -125,7 +113,6 @@ function Documentos() {
   const [dialogo, setDialogo] = useState(false);
   const [juntadaId, setJuntadaId] = useState<string>("");
   const [novaJuntada, setNovaJuntada] = useState("");
-  const [arquivo, setArquivo] = useState<File | null>(null);
 
   // Prioridade 2.4 — busca e filtros (client-side, sem chamada nenhuma ao Google).
   const [busca, setBusca] = useState("");
@@ -232,31 +219,6 @@ function Documentos() {
       setJuntadaId(j.id);
       setNovaJuntada("");
       toast.success(`Juntada nº ${j.numero} criada`);
-      recarregar();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const enviar = useMutation({
-    mutationFn: async () => {
-      if (!arquivo) throw new Error("Selecione um arquivo.");
-      if (!juntadaId) throw new Error("Selecione ou crie uma juntada.");
-      const base64 = await lerArquivo(arquivo);
-      return adicionarAnexo({
-        data: {
-          sindicanciaId: selecionada!.id,
-          juntadaId,
-          nome: arquivo.name,
-          mimeType: arquivo.type || "application/octet-stream",
-          base64,
-        },
-      });
-    },
-    onSuccess: () => {
-      toast.success("Anexo enviado — autos pendentes de sincronizar");
-      setArquivo(null);
-      setDialogo(false);
-      enfileirarSincronizarAutos({ sindicanciaId: selecionada!.id });
       recarregar();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -522,14 +484,18 @@ function Documentos() {
         )}
         {juntadas.map((j) => (
           <div key={j.id} className="space-y-1">
-            <p className="text-sm font-medium">
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
               Juntada nº {j.numero} — {j.titulo}
+              <span className="text-[11px] font-normal text-muted-foreground">
+                {STATUS_JUNTADA_LABEL[j.status ?? "aberta"]}
+                {j.responsavel ? ` · resp.: ${j.responsavel}` : ""}
+              </span>
               {j.url && (
                 <a
                   href={j.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="ml-2 inline-flex items-center text-primary hover:underline"
+                  className="inline-flex items-center text-primary hover:underline"
                 >
                   <ExternalLink className="size-3.5" />
                 </a>
@@ -692,10 +658,10 @@ function Documentos() {
       <Dialog open={dialogo} onOpenChange={setDialogo}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Adicionar anexo aos Autos</DialogTitle>
+            <DialogTitle>Adicionar anexos aos Autos</DialogTitle>
             <DialogDescription>
-              O arquivo é enviado à pasta “Anexos” do NUP {selecionada?.nup || "—"} e fica vinculado
-              à juntada escolhida, preservando a ordem dos autos.
+              Os arquivos são enviados à pasta “Anexos” do NUP {selecionada?.nup || "—"} e ficam
+              vinculados à juntada escolhida, preservando a ordem dos autos.
             </DialogDescription>
           </DialogHeader>
 
@@ -739,26 +705,27 @@ function Documentos() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Arquivo (foto ou PDF)</Label>
-              <Input
-                type="file"
-                accept="image/*,application/pdf"
-                onChange={(e) => setArquivo(e.target.files?.[0] ?? null)}
+            {selecionada && juntadaId && (
+              <SeletorAnexos
+                sindicanciaId={selecionada.id}
+                juntadaId={juntadaId}
+                anexosExistentes={juntadas.find((j) => j.id === juntadaId)?.anexos ?? []}
+                onEnviado={() => {
+                  enfileirarSincronizarAutos({ sindicanciaId: selecionada.id });
+                  recarregar();
+                }}
               />
+            )}
+            {!juntadaId && (
               <p className="text-xs text-muted-foreground">
-                Fotos ficam incorporadas no texto da juntada; PDFs viram um link clicável.
+                Selecione ou crie uma juntada acima para poder enviar arquivos.
               </p>
-            </div>
+            )}
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogo(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={() => enviar.mutate()} disabled={enviar.isPending}>
-              {enviar.isPending && <Loader2 className="size-4 animate-spin" />}
-              Enviar anexo
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
