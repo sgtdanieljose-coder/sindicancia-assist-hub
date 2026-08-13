@@ -241,16 +241,12 @@ function Documentos() {
     mutationFn: async () => {
       if (!arquivo) throw new Error("Selecione um arquivo.");
       if (!juntadaId) throw new Error("Selecione ou crie uma juntada.");
-      const base64 = await lerArquivo(arquivo);
-      return adicionarAnexo({
-        data: {
-          sindicanciaId: selecionada!.id,
-          juntadaId,
-          nome: arquivo.name,
-          mimeType: arquivo.type || "application/octet-stream",
-          base64,
-        },
-      });
+      const form = new FormData();
+      form.set("sindicanciaId", selecionada!.id);
+      form.set("juntadaId", juntadaId);
+      form.set("descricao", arquivo.name);
+      form.set("arquivo", arquivo, arquivo.name);
+      return adicionarAnexo({ data: form });
     },
     onSuccess: () => {
       toast.success("Anexo enviado — autos pendentes de sincronizar");
