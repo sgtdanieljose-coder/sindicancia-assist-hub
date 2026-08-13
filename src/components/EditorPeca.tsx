@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { desfazerInsercao, listarVersoes } from "@/lib/sindicancias.functions";
-import { salvarRascunho, chaveRascunho } from "@/lib/localStore";
+import { salvarRascunho, lerRascunho, chaveRascunho } from "@/lib/localStore";
 import { useStatusSincronizacao, useSyncQueue, alvoPeca } from "@/hooks/useSyncQueue";
 import { HistoricoVersoesDialog } from "@/components/HistoricoVersoesDialog";
 
@@ -95,11 +95,7 @@ export function EditorPeca({
 
   // ------------------------------------------------------------------------------------
   // Prioridade 1.1 — "Salvar" local: grava o rascunho no IndexedDB (debounce de 600ms)
-  // toda vez que o texto muda, sem depender do Google. É só uma rede de segurança contra
-  // perda de conteúdo (ex.: aba fechada sem querer); a fonte de verdade em tela continua
-  // sendo o estado do componente pai (routes/pecas.tsx) — restaurar esse rascunho
-  // automaticamente é um próximo passo, a decidir junto com o fluxo de regeneração do
-  // template a partir dos campos.
+  // toda vez que o texto muda, sem depender do Google.
   // ------------------------------------------------------------------------------------
   const [statusLocal, setStatusLocal] = useState<"salvo" | "salvando">("salvo");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -128,6 +124,53 @@ export function EditorPeca({
   }, [conteudo, sindicanciaId, pecaId]);
 
   // ------------------------------------------------------------------------------------
+  // Prioridade 3.1 — ao trocar de peça (ou abrir o gerador), confere se existe um rascunho
+  // local diferente do texto recém-gerado pelo modelo/campos. Em vez de restaurar sozinho
+  // (o que apagaria silenciosamente uma regeneração de template intencional, ou o
+  // contrário), avisa e deixa o usuário decidir — "evitar perda de conteúdo" sem also
+  // surpreender o usuário trocando o texto embaixo dele.
+  // ------------------------------------------------------------------------------------
+  const [rascunhoDivergente, setRascunhoDivergente] = useState<{
+    texto: string;
+    atualizadoEm: string;
+  } | null>(null);
+  const chaveConferida = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!pecaId) return;
+    const chave = chaveRascunho(sindicanciaId, pecaId);
+    if (chaveConferida.current === chave) return;
+    chaveConferida.current = chave;
+    setRascunhoDivergente(null);
+    let cancelado = false;
+    void lerRascunho(chave).then((r) => {
+      if (cancelado || !r || !r.texto.trim()) return;
+      if (r.texto !== conteudo) {
+        setRascunhoDivergente({ texto: r.texto, atualizadoEm: r.atualizadoEm });
+      }
+    });
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sindicanciaId, pecaId]);
+
+  // ------------------------------------------------------------------------------------
+  // Prioridade 3.4 — "Desfazer alterações": reverte o texto em tela para o último estado
+  // conhecido (carregado ao abrir a peça, ou a última sincronização bem-sucedida), sem
+  // nenhuma chamada ao Google — só mexe no estado local. Distinto do botão "Desfazer
+  // inserção" abaixo, que remove a peça dos autos (esse sim precisa mexer no Drive/Sheets).
+  // ------------------------------------------------------------------------------------
+  const textoBase = useRef(conteudo);
+  useEffect(() => {
+    textoBase.current = conteudo;
+    // Só reancora quando a peça selecionada muda — dentro da mesma peça, textoBase.current
+    // é atualizado manualmente (ver abaixo, ao sincronizar com sucesso).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sindicanciaId, pecaId]);
+  const temAlteracoesLocais = conteudo !== textoBase.current;
+
+  // ------------------------------------------------------------------------------------
   // Prioridade 1.2/1.3/1.7 — "Sincronizar": exportar para o Google Docs passa pela fila de
   // sincronização em vez de uma mutação direta. Isso dá retry com backoff automático (ex.:
   // erro 429 de quota) e evita disparar duas exportações da mesma peça em paralelo se o
@@ -137,6 +180,7 @@ export function EditorPeca({
   const alvoExportacao = alvoPeca(sindicanciaId, existente?.documentId, pecaId);
   const statusExportacao = useStatusSincronizacao(alvoExportacao);
   const ultimoResultadoTratado = useRef<string | undefined>(undefined);
+  const textoEnviado = useRef(conteudo);
 
   useEffect(() => {
     if (!statusExportacao || statusExportacao.atualizadoEm === ultimoResultadoTratado.current) {
@@ -148,6 +192,10 @@ export function EditorPeca({
       setDoc(d);
       setAutosUrl(d.autosUrl ?? null);
       setPerguntando(false);
+      // Prioridade 3.4 — depois de sincronizar com sucesso, "Desfazer alterações" passa a
+      // reverter para este texto (o último que realmente está salvo no Google), não mais
+      // para o texto de quando a peça foi aberta.
+      textoBase.current = textoEnviado.current;
       // Só é possível desfazer uma inserção nova — atualizações não criam folha adicional.
       setUltimaInsercao(d.atualizado ? null : { documentId: d.documentId, posicao: d.posicao });
       toast.success(
@@ -175,6 +223,7 @@ export function EditorPeca({
     statusExportacao?.status === "processing" || statusExportacao?.status === "retrying";
 
   const exportar = (pos?: number) => {
+    textoEnviado.current = conteudo;
     enfileirarExportarPeca(
       { sindicanciaId, titulo, conteudo, posicao: pos, pecaId, unica, etapa },
       { documentId: existente?.documentId },
@@ -220,11 +269,51 @@ export function EditorPeca({
 
   return (
     <div className="space-y-3">
+      {rascunhoDivergente && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span>
+            Encontrei um rascunho local diferente deste texto, salvo em{" "}
+            {new Date(rascunhoDivergente.atualizadoEm).toLocaleString("pt-BR")}. Quer restaurar?
+          </span>
+          <span className="flex shrink-0 gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-xs"
+              onClick={() => {
+                onChange(rascunhoDivergente.texto);
+                setRascunhoDivergente(null);
+              }}
+            >
+              Restaurar rascunho
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs"
+              onClick={() => setRascunhoDivergente(null)}
+            >
+              Descartar
+            </Button>
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <p className="rotulo">Minuta gerada — revise antes de exportar</p>
           <StatusLocalBadge status={statusLocal} />
           <StatusSincronizacaoBadge status={statusExportacao?.status} />
+          {temAlteracoesLocais && (
+            <button
+              type="button"
+              onClick={() => onChange(textoBase.current)}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+              title="Reverte para o último texto sincronizado — não mexe no Google"
+            >
+              <Undo2 className="size-3" /> Desfazer alterações
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {documentIdAtual && (
@@ -258,7 +347,13 @@ export function EditorPeca({
         pecaId={pecaId}
         aberto={historicoAberto}
         onOpenChange={setHistoricoAberto}
-        onRestaurado={onChange}
+        textoAtual={conteudo}
+        onRestaurado={(texto) => {
+          onChange(texto);
+          // Restaurar uma versão antiga também vira o novo "estado sincronizado" de
+          // referência para o Desfazer alterações local (Prioridade 3.4).
+          textoBase.current = texto;
+        }}
         onAtualizado={onExportado}
       />
 
