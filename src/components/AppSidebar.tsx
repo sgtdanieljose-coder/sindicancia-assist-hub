@@ -23,11 +23,11 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const itens = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Gráficos", url: "/graficos", icon: BarChart3 },
+  { title: "Mapa dos Autos", url: "/mapa", icon: Map },
   { title: "Gerador de Peças", url: "/pecas", icon: FileSignature },
   { title: "Relatório do Sindicante", url: "/relatorio", icon: ScrollText },
   { title: "Autos e Documentos", url: "/documentos", icon: FolderOpen },
-  { title: "Mapa dos Autos", url: "/mapa", icon: Map },
+  { title: "Gráficos", url: "/graficos", icon: BarChart3 },
 ];
 
 export function AppSidebar() {
