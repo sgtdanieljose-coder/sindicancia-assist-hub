@@ -17,6 +17,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,8 +40,10 @@ import {
 import { useSindicancias } from "@/components/SindicanciaContext";
 import { HistoricoVersoesDialog } from "@/components/HistoricoVersoesDialog";
 import { SeletorAnexos } from "@/components/SeletorAnexos";
+import { PainelValidacao } from "@/components/PainelValidacao";
 import { atualizarStatusPeca, criarJuntada, reordenarPecas } from "@/lib/sindicancias.functions";
 import { tipoDoItem, formatarDataHora } from "@/lib/documentos-format";
+import type { ItemValidacao } from "@/lib/validacao";
 import {
   PECAS,
   STATUS_PECA,
@@ -94,9 +97,10 @@ function BadgeSincronizacao({ alvo }: { alvo: string }) {
 
 function Documentos() {
   const { itens, selecionada, setSelecionadaId, recarregar } = useSindicancias();
-  const { enfileirarExportarPeca, enfileirarSincronizarAutos } = useSyncQueue();
+  const { enfileirarExportarPeca, enfileirarSincronizarAutos, fila } = useSyncQueue();
 
   const [dialogo, setDialogo] = useState(false);
+  const [validacaoAberta, setValidacaoAberta] = useState(false);
   const [juntadaId, setJuntadaId] = useState<string>("");
   const [novaJuntada, setNovaJuntada] = useState("");
 
@@ -219,6 +223,20 @@ function Documentos() {
     failed: { texto: "🔴 Erro ao sincronizar autos", className: "text-destructive" },
   };
 
+  // Prioridade 6 — a validação em si (validarAutos) só olha o dado da sindicância; o
+  // estado de sincronização é da sessão do navegador, então é complementado aqui a partir
+  // da fila (qualquer operação que falhou vira uma pendência a mais no painel).
+  const itensSincronizacao: ItemValidacao[] = fila
+    .filter((op) => op.status === "failed")
+    .map((op) => ({
+      titulo:
+        op.tipo === "sincronizarAutos"
+          ? "Sincronização do documento único dos autos"
+          : "Sincronização de uma peça com o Google Docs",
+      ok: false,
+      detalhe: op.erro ?? "falha ao sincronizar com o Google — tentativas esgotadas",
+    }));
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
       <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:flex-wrap sm:justify-between">
@@ -229,6 +247,14 @@ function Documentos() {
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!selecionada}
+            onClick={() => setValidacaoAberta(true)}
+          >
+            <ShieldCheck className="size-4" /> Validar Autos
+          </Button>
           <Button size="sm" disabled={!selecionada} onClick={() => setDialogo(true)}>
             <Paperclip className="size-4" /> Adicionar anexos aos Autos
           </Button>
@@ -638,6 +664,15 @@ function Documentos() {
           onOpenChange={setHistoricoAberto}
           textoAtual={pecaAberta.texto}
           onAtualizado={recarregar}
+        />
+      )}
+
+      {selecionada && (
+        <PainelValidacao
+          sindicancia={selecionada}
+          aberto={validacaoAberta}
+          onOpenChange={setValidacaoAberta}
+          itensExtras={itensSincronizacao}
         />
       )}
 
