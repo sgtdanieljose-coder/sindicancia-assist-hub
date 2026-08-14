@@ -5,6 +5,7 @@ import {
   FileSignature,
   ScrollText,
   FolderOpen,
+  Map,
   Shield,
 } from "lucide-react";
 import {
@@ -26,6 +27,7 @@ const itens = [
   { title: "Gerador de Peças", url: "/pecas", icon: FileSignature },
   { title: "Relatório do Sindicante", url: "/relatorio", icon: ScrollText },
   { title: "Autos e Documentos", url: "/documentos", icon: FolderOpen },
+  { title: "Mapa dos Autos", url: "/mapa", icon: Map },
 ];
 
 export function AppSidebar() {
