@@ -675,41 +675,123 @@ export const restaurarVersao = createServerFn({ method: "POST" })
  * alteração relevante (com deduplicação: várias alterações em sequência viram 1 única
  * reconstrução) e que também pode ser disparada manualmente pelo botão "Sincronizar Autos".
  */
+/**
+ * Reconstrói o documento único dos autos (repagina "Fls. N", reaplica formatação) a partir
+ * do estado atual salvo na planilha — Prioridade 1.7/1.8 da evolução do sistema.
+ *
+ * Antes, essa reconstrução rodava embutida (e duplicada 4x, com pequenas variações) dentro
+ * de exportarParaDocs, sincronizarDocumentoJuntada, desfazerInsercao e restaurarVersao —
+ * disparando a cada peça/juntada salva, com custo crescendo linearmente com o total de
+ * peças já lançadas nos autos. Agora é uma operação própria, separada: as 4 funções acima
+ * só marcam o documento único como existente (ensureAutosDoc) e devolvem o controle; quem
+ * decide QUANDO reconstruir de fato é o cliente — via a fila de sincronização
+ * (src/lib/syncQueue.ts), que enfileira esta função automaticamente logo após qualquer
+ * alteração relevante (com deduplicação: várias alterações em sequência viram 1 única
+ * reconstrução) e que também pode ser disparada manualmente pelo botão "Sincronizar Autos".
+ *
+ * Extraída como helper interna porque finalizarAutos (Prioridade 7) precisa do mesmo passo
+ * — garantir que os Autos de Trabalho estão com o conteúdo mais recente — antes de congelar
+ * uma cópia como versão final.
+ */
+async function reconstruirAutosDeTrabalho(atual: Sindicancia): Promise<Sindicancia> {
+  const { ensureAutosDoc, rebuildAutos, getDocText } = await import("./google.server");
+
+  const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+  atual.autosDocId = autos.documentId;
+  atual.autosUrl = autos.url;
+
+  const pecas: {
+    pecaId?: string;
+    titulo: string;
+    tituloInterno?: string;
+    texto: string;
+    anexos?: AnexoJuntada[];
+  }[] = [];
+  for (const d of atual.documentos) {
+    const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+      ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+      : undefined;
+    pecas.push({
+      pecaId: d.pecaId,
+      titulo: d.titulo,
+      tituloInterno: d.tituloInterno,
+      texto: d.texto ?? (await getDocText(d.documentId)),
+      anexos: juntadaDoItem?.anexos,
+    });
+  }
+  await rebuildAutos(autos.documentId, pecas);
+
+  return atual;
+}
+
 export const sincronizarAutos = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string }) => data)
   .handler(async ({ data }) => {
-    const { ensureAutosDoc, rebuildAutos, getDocText, updateRow } = await import("./google.server");
+    const { updateRow } = await import("./google.server");
 
-    const { atual, linha } = await carregar(data.sindicanciaId);
-
-    const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
-    atual.autosDocId = autos.documentId;
-    atual.autosUrl = autos.url;
-
-    const pecas: {
-      pecaId?: string;
-      titulo: string;
-      tituloInterno?: string;
-      texto: string;
-      anexos?: AnexoJuntada[];
-    }[] = [];
-    for (const d of atual.documentos) {
-      const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-        ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-        : undefined;
-      pecas.push({
-        pecaId: d.pecaId,
-        titulo: d.titulo,
-        tituloInterno: d.tituloInterno,
-        texto: d.texto ?? (await getDocText(d.documentId)),
-        anexos: juntadaDoItem?.anexos,
-      });
-    }
-    await rebuildAutos(autos.documentId, pecas);
+    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    const atual = await reconstruirAutosDeTrabalho(atualInicial);
 
     await updateRow(linha, sindicanciaToRow(atual));
 
-    return { autosUrl: atual.autosUrl, autosDocId: atual.autosDocId, totalPecas: pecas.length };
+    return {
+      autosUrl: atual.autosUrl,
+      autosDocId: atual.autosDocId,
+      totalPecas: atual.documentos.length,
+    };
+  });
+
+/**
+ * "Finalizar Autos" (Prioridade 7/8): confere pendências (mesma validação do painel
+ * "Validar Autos" — ver validacao.ts), garante que os Autos de Trabalho estão atualizados e
+ * então congela uma cópia independente no Drive como "Autos Finais — vN". A cópia é um
+ * arquivo à parte (files.copy do Drive) — editar os Autos de Trabalho depois não altera essa
+ * cópia, o que já resolve a Prioridade 8 (separar Autos de Trabalho de Autos Finais) sem
+ * precisar de nenhuma estrutura nova além do histórico de versões finalizadas.
+ *
+ * `forcarComPendencias` deixa finalizar mesmo com pendências em aberto — a validação é
+ * informativa, não um bloqueio automático: quem decide se uma pendência impede ou não a
+ * finalização é o encarregado, não o sistema.
+ */
+export const finalizarAutos = createServerFn({ method: "POST" })
+  .inputValidator((data: { sindicanciaId: string; forcarComPendencias?: boolean }) => data)
+  .handler(async ({ data }) => {
+    const { copiarArquivoDrive, updateRow } = await import("./google.server");
+    const { validarAutos } = await import("./validacao");
+
+    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    const atual = await reconstruirAutosDeTrabalho(atualInicial);
+
+    const pendencias = validarAutos(atual).filter((i) => !i.ok);
+    if (pendencias.length > 0 && !data.forcarComPendencias) {
+      const erro = new Error(
+        `Há ${pendencias.length} pendência(s) nos autos. Corrija-as ou confirme a finalização mesmo assim.`,
+      );
+      (erro as Error & { pendencias?: typeof pendencias }).pendencias = pendencias;
+      throw erro;
+    }
+
+    if (!atual.autosDocId) {
+      throw new Error("Não foi possível localizar o documento único dos autos para finalizar.");
+    }
+
+    const versao = (atual.autosFinais?.length ?? 0) + 1;
+    const nomeArquivo = `Autos Finais — v${versao} — NUP ${atual.nup}`;
+    const copia = await copiarArquivoDrive(atual.autosDocId, nomeArquivo, atual.pastaId);
+
+    const registro = {
+      versao,
+      data: new Date().toISOString(),
+      documentId: copia.documentId,
+      url: copia.url,
+      totalPecas: atual.documentos.length,
+      pendenciasNaFinalizacao: pendencias.length,
+    };
+    atual.autosFinais = [...(atual.autosFinais ?? []), registro];
+
+    await updateRow(linha, sindicanciaToRow(atual));
+
+    return registro;
   });
 
 /**
