@@ -87,11 +87,31 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Painel de Sindicâncias | Gestão do Encarregado — EB" },
       { property: "og:title", content: "Painel de Sindicâncias | Gestão do Encarregado — EB" },
       { name: "twitter:title", content: "Painel de Sindicâncias | Gestão do Encarregado — EB" },
-      { name: "description", content: "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais." },
-      { property: "og:description", content: "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais." },
-      { name: "twitter:description", content: "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais." },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4ec81477-cd8a-4aa3-8969-889a12bc81b6" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4ec81477-cd8a-4aa3-8969-889a12bc81b6" },
+      {
+        name: "description",
+        content:
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+      },
+      {
+        property: "og:description",
+        content:
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+      },
+      {
+        name: "twitter:description",
+        content:
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4ec81477-cd8a-4aa3-8969-889a12bc81b6",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/4ec81477-cd8a-4aa3-8969-889a12bc81b6",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -132,9 +152,11 @@ function RootComponent() {
       <SindicanciaProvider>
         <SidebarProvider>
           <div className="flex min-h-screen w-full">
-            <AppSidebar />
+            <div className="contents print:hidden">
+              <AppSidebar />
+            </div>
             <div className="flex min-w-0 flex-1 flex-col">
-              <header className="flex h-12 items-center gap-2 border-b border-border bg-sidebar px-2">
+              <header className="flex h-12 items-center gap-2 border-b border-border bg-sidebar px-2 print:hidden">
                 <SidebarTrigger />
                 <span className="rotulo truncate">
                   Sistema de Gestão de Sindicâncias — Encarregado
