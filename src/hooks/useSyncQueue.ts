@@ -4,11 +4,13 @@ import {
   alvoPeca,
   alvoAutos,
   type StatusAlvo,
+  type EntradaHistorico,
   type PayloadExportarPeca,
   type PayloadSincronizarAutos,
 } from "@/lib/syncQueue";
 
 const SEM_STATUS: StatusAlvo | undefined = undefined;
+const HISTORICO_VAZIO: EntradaHistorico[] = [];
 
 /**
  * Status de sincronização (com o Google) de um alvo específico — uma peça
@@ -23,6 +25,22 @@ export function useStatusSincronizacao(alvo: string | undefined): StatusAlvo | u
   );
 }
 
+/** Prioridade 9 — histórico recente (sessão atual) + horário da última sincronização OK,
+ *  usados pelo painel de saúde da sincronização. */
+export function useSaudeSincronizacao() {
+  const historico = useSyncExternalStore(
+    filaSync.subscribe,
+    filaSync.obterHistorico,
+    () => HISTORICO_VAZIO,
+  );
+  const ultimoSucesso = useSyncExternalStore(
+    filaSync.subscribe,
+    filaSync.obterUltimoSucesso,
+    () => undefined,
+  );
+  return { historico, ultimoSucesso };
+}
+
 /** Exposição da fila de sincronização para componentes React — ver syncQueue.ts para a
  *  lógica de fila/retry/dedupe em si; este hook só assina o estado e expõe helpers
  *  tipados para enfileirar as duas operações que hoje passam pela fila (Prioridade 1). */
@@ -30,16 +48,13 @@ export function useSyncQueue() {
   const fila = useSyncExternalStore(filaSync.subscribe, filaSync.obterInstantaneo, () => []);
 
   const enfileirarExportarPeca = useCallback(
-    (
-      payload: PayloadExportarPeca,
-      opcoes?: { documentId?: string; prioridade?: number },
-    ) =>
+    (payload: PayloadExportarPeca, opts?: { documentId?: string; prioridade?: number }) =>
       filaSync.enfileirar({
         tipo: "exportarPeca",
-        alvo: alvoPeca(payload.sindicanciaId, opcoes?.documentId, payload.pecaId),
+        alvo: alvoPeca(payload.sindicanciaId, opts?.documentId, payload.pecaId),
         sindicanciaId: payload.sindicanciaId,
         payload,
-        prioridade: opcoes?.prioridade,
+        prioridade: opts?.prioridade,
       }),
     [],
   );
@@ -60,9 +75,20 @@ export function useSyncQueue() {
 
   const reenfileirar = useCallback((alvo: string) => filaSync.reenfileirar(alvo), []);
 
+  const reenfileirarTodasComErro = useCallback(() => {
+    fila.filter((o) => o.status === "failed").forEach((o) => filaSync.reenfileirar(o.alvo));
+  }, [fila]);
+
   const pendencias = fila.filter((o) => o.status !== "completed").length;
 
-  return { fila, pendencias, enfileirarExportarPeca, enfileirarSincronizarAutos, reenfileirar };
+  return {
+    fila,
+    pendencias,
+    enfileirarExportarPeca,
+    enfileirarSincronizarAutos,
+    reenfileirar,
+    reenfileirarTodasComErro,
+  };
 }
 
 export { alvoPeca, alvoAutos };
