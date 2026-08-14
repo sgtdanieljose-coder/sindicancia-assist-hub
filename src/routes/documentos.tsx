@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +42,7 @@ import { useSindicancias } from "@/components/SindicanciaContext";
 import { HistoricoVersoesDialog } from "@/components/HistoricoVersoesDialog";
 import { SeletorAnexos } from "@/components/SeletorAnexos";
 import { PainelValidacao } from "@/components/PainelValidacao";
+import { FinalizarAutosDialog } from "@/components/FinalizarAutosDialog";
 import { atualizarStatusPeca, criarJuntada, reordenarPecas } from "@/lib/sindicancias.functions";
 import { tipoDoItem, formatarDataHora } from "@/lib/documentos-format";
 import type { ItemValidacao } from "@/lib/validacao";
@@ -101,6 +103,7 @@ function Documentos() {
 
   const [dialogo, setDialogo] = useState(false);
   const [validacaoAberta, setValidacaoAberta] = useState(false);
+  const [finalizacaoAberta, setFinalizacaoAberta] = useState(false);
   const [juntadaId, setJuntadaId] = useState<string>("");
   const [novaJuntada, setNovaJuntada] = useState("");
 
@@ -255,6 +258,14 @@ function Documentos() {
           >
             <ShieldCheck className="size-4" /> Validar Autos
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!selecionada || documentos.length === 0}
+            onClick={() => setFinalizacaoAberta(true)}
+          >
+            <Lock className="size-4" /> Finalizar Autos
+          </Button>
           <Button size="sm" disabled={!selecionada} onClick={() => setDialogo(true)}>
             <Paperclip className="size-4" /> Adicionar anexos aos Autos
           </Button>
@@ -317,6 +328,24 @@ function Documentos() {
           >
             <RefreshCw className="size-3.5" /> Sincronizar Autos
           </button>
+        </div>
+      )}
+
+      {selecionada && (selecionada.autosFinais?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted-foreground">
+          <Lock className="size-3.5" />
+          <span>Versões finalizadas:</span>
+          {selecionada.autosFinais!.map((f) => (
+            <a
+              key={f.versao}
+              href={f.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-0.5 text-primary hover:underline"
+            >
+              v{f.versao} <ExternalLink className="size-3" />
+            </a>
+          ))}
         </div>
       )}
 
@@ -673,6 +702,16 @@ function Documentos() {
           aberto={validacaoAberta}
           onOpenChange={setValidacaoAberta}
           itensExtras={itensSincronizacao}
+        />
+      )}
+
+      {selecionada && (
+        <FinalizarAutosDialog
+          sindicancia={selecionada}
+          aberto={finalizacaoAberta}
+          onOpenChange={setFinalizacaoAberta}
+          itensExtras={itensSincronizacao}
+          onFinalizado={recarregar}
         />
       )}
 
