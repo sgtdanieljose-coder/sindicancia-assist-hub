@@ -6,6 +6,7 @@ import {
   ScrollText,
   FolderOpen,
   Map,
+  Activity,
   Shield,
 } from "lucide-react";
 import {
@@ -23,11 +24,12 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const itens = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Mapa dos Autos", url: "/mapa", icon: Map },
+  { title: "Gráficos", url: "/graficos", icon: BarChart3 },
   { title: "Gerador de Peças", url: "/pecas", icon: FileSignature },
   { title: "Relatório do Sindicante", url: "/relatorio", icon: ScrollText },
   { title: "Autos e Documentos", url: "/documentos", icon: FolderOpen },
-  { title: "Gráficos", url: "/graficos", icon: BarChart3 },
+  { title: "Mapa dos Autos", url: "/mapa", icon: Map },
+  { title: "Saúde da Sincronização", url: "/sincronizacao", icon: Activity },
 ];
 
 export function AppSidebar() {
