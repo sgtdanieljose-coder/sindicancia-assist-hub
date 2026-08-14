@@ -151,9 +151,23 @@ export type Sindicancia = {
   subordinacao: string;
   /** OM instauradora (comando que expediu a portaria). */
   omInstauradora: string;
-  /** Documento único (autos paginados) no Google Docs. */
+  /** Documento único (autos paginados) no Google Docs — os "Autos de Trabalho": continuam
+   *  editáveis normalmente enquanto a sindicância está em andamento. */
   autosDocId?: string;
   autosUrl?: string;
+  /** Histórico de finalizações (Prioridade 7/8) — cada uma é uma cópia independente dos
+   *  Autos de Trabalho no momento em que foi finalizada ("Autos Finais — vN"); editar os
+   *  Autos de Trabalho depois não altera essas cópias. Ausente em sindicâncias que nunca
+   *  foram finalizadas. */
+  autosFinais?: {
+    versao: number;
+    data: string;
+    documentId: string;
+    url: string;
+    totalPecas: number;
+    /** Quantas pendências a validação apontou no momento da finalização (0 = sem nenhuma). */
+    pendenciasNaFinalizacao: number;
+  }[];
   /** Juntadas do processo, cada uma com seus anexos vinculados ao NUP. */
   juntadas: Juntada[];
   /** Dias adicionais concedidos por prorrogação (somados aos 30 dias corridos regulamentares). */
