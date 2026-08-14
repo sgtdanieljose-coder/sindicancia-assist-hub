@@ -37,6 +37,7 @@ export function rowToSindicancia(row: string[]): Sindicancia {
     prazoProrrogadoDias: row[23] ? Number(row[23]) || 0 : 0,
     localTrabalhos: row[24] ?? "",
     tags: safeParse<string[]>(row[25], []),
+    autosFinais: safeParse<Sindicancia["autosFinais"]>(row[26], []),
   };
 }
 
@@ -68,5 +69,6 @@ export function sindicanciaToRow(s: Sindicancia): string[] {
     String(s.prazoProrrogadoDias ?? 0),
     s.localTrabalhos ?? "",
     JSON.stringify(s.tags ?? []),
+    JSON.stringify(s.autosFinais ?? []),
   ];
 }
