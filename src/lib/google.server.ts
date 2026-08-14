@@ -8,13 +8,6 @@ const KEY_ENV: Record<Connector, string> = {
   google_drive: "GOOGLE_DRIVE_API_KEY",
 };
 
-/** Erros transitórios do gateway/Google (indisponibilidade momentânea ou excesso de
- *  requisições) — vale a pena repetir a chamada em vez de estourar para a UI. */
-const STATUS_TRANSITORIO = new Set([408, 425, 429, 500, 502, 503, 504]);
-const TENTATIVAS = 4;
-
-const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 export async function gw<T = unknown>(
   connector: Connector,
   path: string,
@@ -27,61 +20,29 @@ export async function gw<T = unknown>(
   }
 
   const qs = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
+  const res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
+    method: init.method ?? "GET",
+    headers: {
+      Authorization: `Bearer ${lovableKey}`,
+      "X-Connection-Api-Key": connKey,
+      "Content-Type": "application/json",
+    },
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  });
 
-  let ultimoErro: Error = new Error("Falha desconhecida ao chamar a API do Google.");
-
-  for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
-    let res: Response;
-    try {
-      res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
-        method: init.method ?? "GET",
-        headers: {
-          Authorization: `Bearer ${lovableKey}`,
-          "X-Connection-Api-Key": connKey,
-          "Content-Type": "application/json",
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      });
-    } catch (e) {
-      // Falha de rede (conexão resetada) — também é transitória.
-      ultimoErro = e instanceof Error ? e : new Error(String(e));
-      if (tentativa < TENTATIVAS) {
-        await esperar(400 * 2 ** (tentativa - 1));
-        continue;
-      }
-      throw new Error(
-        `Não foi possível falar com o Google agora (${ultimoErro.message}). Tente novamente em instantes.`,
-      );
-    }
-
-    if (res.ok) return (await res.json()) as T;
-
+  if (!res.ok) {
     const text = await res.text();
-    console.error(
-      `Gateway ${connector} ${path} falhou [${res.status}] (tentativa ${tentativa}/${TENTATIVAS}): ${text}`,
-    );
-
-    if (STATUS_TRANSITORIO.has(res.status) && tentativa < TENTATIVAS) {
-      await esperar(400 * 2 ** (tentativa - 1));
-      continue;
-    }
-
+    console.error(`Gateway ${connector} ${path} falhou [${res.status}]: ${text}`);
     if (res.status === 429) {
       throw new Error(
         "Limite de requisições do Google atingido momentaneamente. Aguarde alguns instantes e clique em Atualizar.",
       );
     }
-    if (STATUS_TRANSITORIO.has(res.status)) {
-      throw new Error(
-        "O Google está temporariamente indisponível. Aguarde alguns instantes e clique em Atualizar.",
-      );
-    }
     throw new Error(`Google API [${res.status}]: ${text.slice(0, 400)}`);
   }
 
-  throw ultimoErro;
+  return (await res.json()) as T;
 }
-
 
 /** Chamada crua ao gateway (usada em uploads multipart do Drive). */
 export async function gwRaw(
@@ -151,6 +112,7 @@ export const HEADERS = [
   "prazo_prorrogado_dias",
   "local_trabalhos",
   "tags",
+  "autos_finais",
 ];
 
 /** Converte um índice de coluna 1-based em letra de coluna do Sheets (1 -> A, 17 -> Q, 27 -> AA...). */
@@ -1443,4 +1405,23 @@ export async function moverParaLixeira(fileId: string) {
     method: "PATCH",
     body: { trashed: true },
   });
+}
+
+/**
+ * Copia um arquivo do Drive (usado por finalizarAutos, Prioridade 7/8, para congelar uma
+ * cópia independente do documento único como "Autos Finais — vN"). files.copy é uma única
+ * chamada JSON simples, do mesmo jeito que o resto do arquivo já chama o Drive — bem mais
+ * barato do que reconstruir o conteúdo de novo num documento novo.
+ */
+export async function copiarArquivoDrive(fileId: string, novoNome: string, pastaId?: string) {
+  const body: Record<string, unknown> = { name: novoNome };
+  if (pastaId) body.parents = [pastaId];
+  const copia = await gw<{ id: string }>("google_drive", `/drive/v3/files/${fileId}/copy`, {
+    method: "POST",
+    body,
+  });
+  return {
+    documentId: copia.id,
+    url: `https://docs.google.com/document/d/${copia.id}/edit`,
+  };
 }
