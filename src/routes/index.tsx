@@ -94,7 +94,9 @@ const vazia: Sindicancia = {
 };
 
 function Dashboard() {
-  const { itens, erro, carregando, selecionada, setSelecionadaId, recarregar } = useSindicancias();
+  const { itens, erro, carregando, selecionada, setSelecionadaId, recarregar, usandoCache, cacheEm } =
+    useSindicancias();
+
   const [form, setForm] = useState<Sindicancia>(vazia);
   const [tagsAbertas, setTagsAbertas] = useState(false);
 
