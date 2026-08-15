@@ -8,6 +8,34 @@ const KEY_ENV: Record<Connector, string> = {
   google_drive: "GOOGLE_DRIVE_API_KEY",
 };
 
+// Prioridade 10 — contador de chamadas ao Google nesta execução do server function (cada
+// requisição HTTP ao Worker começa com contadorRequisicoes zerado — ver
+// resetarContadorRequisicoes, chamado no início de cada operação instrumentada). Serve só
+// para o diagnóstico ("quantidade de requisições" por operação); não tem efeito nenhum na
+// lógica de negócio.
+let contadorRequisicoes = 0;
+
+export function resetarContadorRequisicoes() {
+  contadorRequisicoes = 0;
+}
+
+export function obterContadorRequisicoes() {
+  return contadorRequisicoes;
+}
+
+/** Mensagem amigável por status HTTP — mantém o prefixo "[status]" sempre no início, pra dar
+ *  pra classificar erros (429, 404...) no painel de Diagnóstico (Prioridade 10) sem depender
+ *  de propriedades de Error que não sobrevivem à borda do server function. */
+function mensagemErroGoogle(status: number, corpo: string): string {
+  if (status === 429) {
+    return `[${status}] Limite de requisições do Google atingido momentaneamente. Aguarde alguns instantes e clique em Atualizar.`;
+  }
+  if (status === 404) {
+    return `[${status}] Recurso não encontrado no Google — pode ter sido movido ou apagado por fora do sistema.`;
+  }
+  return `[${status}] Google API: ${corpo.slice(0, 300)}`;
+}
+
 export async function gw<T = unknown>(
   connector: Connector,
   path: string,
@@ -20,6 +48,7 @@ export async function gw<T = unknown>(
   }
 
   const qs = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
+  contadorRequisicoes += 1;
   const res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
     method: init.method ?? "GET",
     headers: {
@@ -33,12 +62,7 @@ export async function gw<T = unknown>(
   if (!res.ok) {
     const text = await res.text();
     console.error(`Gateway ${connector} ${path} falhou [${res.status}]: ${text}`);
-    if (res.status === 429) {
-      throw new Error(
-        "Limite de requisições do Google atingido momentaneamente. Aguarde alguns instantes e clique em Atualizar.",
-      );
-    }
-    throw new Error(`Google API [${res.status}]: ${text.slice(0, 400)}`);
+    throw new Error(mensagemErroGoogle(res.status, text));
   }
 
   return (await res.json()) as T;
@@ -56,6 +80,7 @@ export async function gwRaw(
     throw new Error(`Conexão Google indisponível (${connector}). Reconecte o Google Workspace.`);
   }
   const qs = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
+  contadorRequisicoes += 1;
   const res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
     method: init.method,
     headers: {
@@ -68,7 +93,7 @@ export async function gwRaw(
   if (!res.ok) {
     const text = await res.text();
     console.error(`Gateway ${connector} ${path} falhou [${res.status}]: ${text}`);
-    throw new Error(`Google API [${res.status}]: ${text.slice(0, 400)}`);
+    throw new Error(mensagemErroGoogle(res.status, text));
   }
   return (await res.json()) as Record<string, unknown>;
 }
