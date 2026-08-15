@@ -94,7 +94,9 @@ const vazia: Sindicancia = {
 };
 
 function Dashboard() {
-  const { itens, erro, carregando, selecionada, setSelecionadaId, recarregar } = useSindicancias();
+  const { itens, erro, carregando, selecionada, setSelecionadaId, recarregar, usandoCache, cacheEm } =
+    useSindicancias();
+
   const [form, setForm] = useState<Sindicancia>(vazia);
   const [tagsAbertas, setTagsAbertas] = useState(false);
 
@@ -162,11 +164,24 @@ function Dashboard() {
       </header>
 
       {erro && (
-        <div className="painel flex items-start gap-2 p-4 text-sm text-destructive">
+        <div
+          className={`painel flex items-start gap-2 p-4 text-sm ${
+            usandoCache ? "text-warning" : "text-destructive"
+          }`}
+        >
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span className="min-w-0 break-words">{erro}</span>
+          <span className="min-w-0 break-words">
+            {erro}
+            {usandoCache && cacheEm && (
+              <span className="block text-xs text-muted-foreground">
+                Cópia local de {new Date(cacheEm).toLocaleString("pt-BR")} — novas gravações só
+                serão aplicadas quando o Google voltar.
+              </span>
+            )}
+          </span>
         </div>
       )}
+
 
       {itens.length > 0 && (
         <div className="painel space-y-3 p-4 sm:p-5">

@@ -12,8 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocumentosRouteImport } from './routes/documentos'
 import { Route as GraficosRouteImport } from './routes/graficos'
+import { Route as MapaRouteImport } from './routes/mapa'
 import { Route as PecasRouteImport } from './routes/pecas'
 import { Route as RelatorioRouteImport } from './routes/relatorio'
+import { Route as SincronizacaoRouteImport } from './routes/sincronizacao'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -30,6 +32,11 @@ const GraficosRoute = GraficosRouteImport.update({
   path: '/graficos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MapaRoute = MapaRouteImport.update({
+  id: '/mapa',
+  path: '/mapa',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PecasRoute = PecasRouteImport.update({
   id: '/pecas',
   path: '/pecas',
@@ -40,43 +47,78 @@ const RelatorioRoute = RelatorioRouteImport.update({
   path: '/relatorio',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SincronizacaoRoute = SincronizacaoRouteImport.update({
+  id: '/sincronizacao',
+  path: '/sincronizacao',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/documentos': typeof DocumentosRoute
   '/graficos': typeof GraficosRoute
+  '/mapa': typeof MapaRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
+  '/sincronizacao': typeof SincronizacaoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/documentos': typeof DocumentosRoute
   '/graficos': typeof GraficosRoute
+  '/mapa': typeof MapaRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
+  '/sincronizacao': typeof SincronizacaoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/documentos': typeof DocumentosRoute
   '/graficos': typeof GraficosRoute
+  '/mapa': typeof MapaRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
+  '/sincronizacao': typeof SincronizacaoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/documentos' | '/graficos' | '/pecas' | '/relatorio'
+  fullPaths:
+    | '/'
+    | '/documentos'
+    | '/graficos'
+    | '/mapa'
+    | '/pecas'
+    | '/relatorio'
+    | '/sincronizacao'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/documentos' | '/graficos' | '/pecas' | '/relatorio'
-  id: '__root__' | '/' | '/documentos' | '/graficos' | '/pecas' | '/relatorio'
+  to:
+    | '/'
+    | '/documentos'
+    | '/graficos'
+    | '/mapa'
+    | '/pecas'
+    | '/relatorio'
+    | '/sincronizacao'
+  id:
+    | '__root__'
+    | '/'
+    | '/documentos'
+    | '/graficos'
+    | '/mapa'
+    | '/pecas'
+    | '/relatorio'
+    | '/sincronizacao'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DocumentosRoute: typeof DocumentosRoute
   GraficosRoute: typeof GraficosRoute
+  MapaRoute: typeof MapaRoute
   PecasRoute: typeof PecasRoute
   RelatorioRoute: typeof RelatorioRoute
+  SincronizacaoRoute: typeof SincronizacaoRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -102,6 +144,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GraficosRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mapa': {
+      id: '/mapa'
+      path: '/mapa'
+      fullPath: '/mapa'
+      preLoaderRoute: typeof MapaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pecas': {
       id: '/pecas'
       path: '/pecas'
@@ -116,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RelatorioRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sincronizacao': {
+      id: '/sincronizacao'
+      path: '/sincronizacao'
+      fullPath: '/sincronizacao'
+      preLoaderRoute: typeof SincronizacaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -123,8 +179,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DocumentosRoute: DocumentosRoute,
   GraficosRoute: GraficosRoute,
+  MapaRoute: MapaRoute,
   PecasRoute: PecasRoute,
   RelatorioRoute: RelatorioRoute,
+  SincronizacaoRoute: SincronizacaoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
