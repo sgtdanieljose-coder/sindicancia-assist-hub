@@ -253,9 +253,17 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       arquivoAtivo,
       getDocText,
       formatarPecaBasica,
+      resetarContadorRequisicoes,
+      obterContadorRequisicoes,
     } = await import("./google.server");
+    const { criarRastreador } = await import("./rastreamento");
+    resetarContadorRequisicoes();
+    const inicio = Date.now();
+    const rastreador = criarRastreador();
 
-    const { atual, linha } = await carregar(data.sindicanciaId);
+    const { atual, linha } = await rastreador.medir("carregar sindicância", () =>
+      carregar(data.sindicanciaId),
+    );
 
     // A pasta da sindicância pode ter sido apagada/movida pra lixeira no Drive por fora do
     // app — nesse caso o ID salvo fica "morto" e os próximos documentos seriam criados fora
@@ -296,12 +304,16 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       let anterior = existenteAtivo.texto ?? "";
       if (!existenteAtivo.texto) {
         try {
-          anterior = await getDocText(existenteAtivo.documentId);
+          anterior = await rastreador.medir("ler texto anterior", () =>
+            getDocText(existenteAtivo.documentId),
+          );
         } catch (e) {
           console.warn("Não foi possível ler o texto anterior da peça:", e);
         }
       }
-      doc = await updateDocContent(existenteAtivo.documentId, data.conteudo);
+      doc = await rastreador.medir("atualizar documento individual", () =>
+        updateDocContent(existenteAtivo.documentId, data.conteudo),
+      );
       pos = lista.findIndex((d) => d.documentId === existenteAtivo.documentId) + 1;
       lista = lista.map((d) =>
         d.documentId === existenteAtivo.documentId
@@ -315,7 +327,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
           : d,
       );
     } else if (existenteBruto) {
-      doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
+      doc = await rastreador.medir("recriar documento individual", () =>
+        createDoc(data.titulo, data.conteudo, atual.pastaId),
+      );
       const idxAntigo = lista.findIndex((d) => d.documentId === existenteBruto.documentId);
       pos = idxAntigo + 1;
       lista[idxAntigo] = {
@@ -330,7 +344,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
         atualizadoEm: agora,
       };
     } else {
-      doc = await createDoc(data.titulo, data.conteudo, atual.pastaId);
+      doc = await rastreador.medir("criar documento individual", () =>
+        createDoc(data.titulo, data.conteudo, atual.pastaId),
+      );
       const total = lista.length + 1;
       pos = Math.min(Math.max(data.posicao ?? total, 1), total);
       lista.splice(pos - 1, 0, {
@@ -349,7 +365,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     // Formatação-base (cabeçalho/título/assinatura) — mesma lógica usada no consolidado.
     let avisoFormatacao: string | undefined;
     try {
-      await formatarPecaBasica(doc.documentId, data.pecaId);
+      await rastreador.medir("formatar peça (batchUpdate)", () =>
+        formatarPecaBasica(doc.documentId, data.pecaId),
+      );
     } catch (e) {
       console.warn("Falha ao formatar a peça:", e);
       avisoFormatacao = e instanceof Error ? e.message : "Falha desconhecida ao formatar a peça.";
@@ -367,7 +385,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     // ou disparado manualmente pelo usuário em "Sincronizar Autos".
     let autosUrl = atual.autosUrl;
     try {
-      const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+      const autos = await rastreador.medir("localizar/garantir documento único", () =>
+        ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId),
+      );
       atual.autosDocId = autos.documentId;
       atual.autosUrl = autos.url;
       autosUrl = autos.url;
@@ -376,7 +396,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     }
 
     try {
-      await updateRow(linha, sindicanciaToRow(atual));
+      await rastreador.medir("gravar linha na planilha", () =>
+        updateRow(linha, sindicanciaToRow(atual)),
+      );
     } catch (e) {
       console.warn("Falha ao registrar documento na planilha:", e);
     }
@@ -388,6 +410,11 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
       atualizado: Boolean(existenteAtivo),
       recriado: Boolean(existenteBruto) && !existenteAtivo,
       avisoFormatacao,
+      diagnostico: {
+        totalMs: Date.now() - inicio,
+        totalRequisicoes: obterContadorRequisicoes(),
+        etapas: rastreador.etapas,
+      },
     };
   });
 
@@ -693,10 +720,15 @@ export const restaurarVersao = createServerFn({ method: "POST" })
  * — garantir que os Autos de Trabalho estão com o conteúdo mais recente — antes de congelar
  * uma cópia como versão final.
  */
-async function reconstruirAutosDeTrabalho(atual: Sindicancia): Promise<Sindicancia> {
+async function reconstruirAutosDeTrabalho(
+  atual: Sindicancia,
+  rastreador: ReturnType<typeof import("./rastreamento").criarRastreador>,
+): Promise<Sindicancia> {
   const { ensureAutosDoc, rebuildAutos, getDocText } = await import("./google.server");
 
-  const autos = await ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId);
+  const autos = await rastreador.medir("localizar/garantir documento único", () =>
+    ensureAutosDoc(atual.nup, atual.autosDocId, atual.pastaId),
+  );
   atual.autosDocId = autos.documentId;
   atual.autosUrl = autos.url;
 
@@ -707,19 +739,23 @@ async function reconstruirAutosDeTrabalho(atual: Sindicancia): Promise<Sindicanc
     texto: string;
     anexos?: AnexoJuntada[];
   }[] = [];
-  for (const d of atual.documentos) {
-    const juntadaDoItem = d.pecaId?.startsWith("juntada-")
-      ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
-      : undefined;
-    pecas.push({
-      pecaId: d.pecaId,
-      titulo: d.titulo,
-      tituloInterno: d.tituloInterno,
-      texto: d.texto ?? (await getDocText(d.documentId)),
-      anexos: juntadaDoItem?.anexos,
-    });
-  }
-  await rebuildAutos(autos.documentId, pecas);
+  await rastreador.medir("montar lista de peças", async () => {
+    for (const d of atual.documentos) {
+      const juntadaDoItem = d.pecaId?.startsWith("juntada-")
+        ? atual.juntadas.find((j) => `juntada-${j.id}` === d.pecaId)
+        : undefined;
+      pecas.push({
+        pecaId: d.pecaId,
+        titulo: d.titulo,
+        tituloInterno: d.tituloInterno,
+        texto: d.texto ?? (await getDocText(d.documentId)),
+        anexos: juntadaDoItem?.anexos,
+      });
+    }
+  });
+  await rastreador.medir("reconstruir documento único (batchUpdate)", () =>
+    rebuildAutos(autos.documentId, pecas),
+  );
 
   return atual;
 }
@@ -727,17 +763,31 @@ async function reconstruirAutosDeTrabalho(atual: Sindicancia): Promise<Sindicanc
 export const sincronizarAutos = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string }) => data)
   .handler(async ({ data }) => {
-    const { updateRow } = await import("./google.server");
+    const { updateRow, resetarContadorRequisicoes, obterContadorRequisicoes } =
+      await import("./google.server");
+    const { criarRastreador } = await import("./rastreamento");
+    resetarContadorRequisicoes();
+    const inicio = Date.now();
+    const rastreador = criarRastreador();
 
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
-    const atual = await reconstruirAutosDeTrabalho(atualInicial);
+    const { atual: atualInicial, linha } = await rastreador.medir("carregar sindicância", () =>
+      carregar(data.sindicanciaId),
+    );
+    const atual = await reconstruirAutosDeTrabalho(atualInicial, rastreador);
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await rastreador.medir("gravar linha na planilha", () =>
+      updateRow(linha, sindicanciaToRow(atual)),
+    );
 
     return {
       autosUrl: atual.autosUrl,
       autosDocId: atual.autosDocId,
       totalPecas: atual.documentos.length,
+      diagnostico: {
+        totalMs: Date.now() - inicio,
+        totalRequisicoes: obterContadorRequisicoes(),
+        etapas: rastreador.etapas,
+      },
     };
   });
 
@@ -756,11 +806,18 @@ export const sincronizarAutos = createServerFn({ method: "POST" })
 export const finalizarAutos = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string; forcarComPendencias?: boolean }) => data)
   .handler(async ({ data }) => {
-    const { copiarArquivoDrive, updateRow } = await import("./google.server");
+    const { copiarArquivoDrive, updateRow, resetarContadorRequisicoes, obterContadorRequisicoes } =
+      await import("./google.server");
     const { validarAutos } = await import("./validacao");
+    const { criarRastreador } = await import("./rastreamento");
+    resetarContadorRequisicoes();
+    const inicio = Date.now();
+    const rastreador = criarRastreador();
 
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
-    const atual = await reconstruirAutosDeTrabalho(atualInicial);
+    const { atual: atualInicial, linha } = await rastreador.medir("carregar sindicância", () =>
+      carregar(data.sindicanciaId),
+    );
+    const atual = await reconstruirAutosDeTrabalho(atualInicial, rastreador);
 
     const pendencias = validarAutos(atual).filter((i) => !i.ok);
     if (pendencias.length > 0 && !data.forcarComPendencias) {
@@ -777,7 +834,9 @@ export const finalizarAutos = createServerFn({ method: "POST" })
 
     const versao = (atual.autosFinais?.length ?? 0) + 1;
     const nomeArquivo = `Autos Finais — v${versao} — NUP ${atual.nup}`;
-    const copia = await copiarArquivoDrive(atual.autosDocId, nomeArquivo, atual.pastaId);
+    const copia = await rastreador.medir("copiar arquivo no Drive", () =>
+      copiarArquivoDrive(atual.autosDocId!, nomeArquivo, atual.pastaId),
+    );
 
     const registro = {
       versao,
@@ -789,9 +848,18 @@ export const finalizarAutos = createServerFn({ method: "POST" })
     };
     atual.autosFinais = [...(atual.autosFinais ?? []), registro];
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await rastreador.medir("gravar linha na planilha", () =>
+      updateRow(linha, sindicanciaToRow(atual)),
+    );
 
-    return registro;
+    return {
+      ...registro,
+      diagnostico: {
+        totalMs: Date.now() - inicio,
+        totalRequisicoes: obterContadorRequisicoes(),
+        etapas: rastreador.etapas,
+      },
+    };
   });
 
 /**
