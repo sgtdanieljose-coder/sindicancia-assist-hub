@@ -25,6 +25,7 @@ import {
   salvarOperacaoPersistida,
   apagarOperacaoPersistida,
 } from "./localStore";
+import type { EtapaMedida } from "./rastreamento";
 
 export type StatusOperacao = "pending" | "processing" | "completed" | "failed" | "retrying";
 
@@ -58,6 +59,9 @@ export type OperacaoSync = {
   tentativas: number;
   erro?: string;
   ultimaTentativa?: string;
+  /** Quando esta tentativa começou a processar — usado só para calcular duracaoMs no
+   *  histórico (Prioridade 10); não é persistido nem afeta a lógica da fila. */
+  iniciadoEm?: string;
 };
 
 export type StatusAlvo = {
@@ -68,9 +72,11 @@ export type StatusAlvo = {
 };
 
 /** Uma linha do histórico recente — usada pelo painel de saúde da sincronização
- *  (Prioridade 9) para "Última sincronização" e "Ver detalhes". Fica só em memória
- *  (não persiste no IndexedDB): é um resumo da sessão atual, não um log permanente — um
- *  log técnico persistente de verdade é a Prioridade 10, ainda não implementada. */
+ *  (Prioridade 9) e pelo painel de Diagnóstico (Prioridade 10) para "Última sincronização"
+ *  e "Ver detalhes". Fica só em memória (não persiste no IndexedDB): é um resumo da sessão
+ *  atual, não um log permanente entre sessões — não há banco de dados no servidor para
+ *  guardar isso além da própria planilha, e gravar log ali destruiria o objetivo da
+ *  Prioridade 1 de reduzir gravações. */
 export type EntradaHistorico = {
   id: string;
   tipo: TipoOperacao;
@@ -79,9 +85,40 @@ export type EntradaHistorico = {
   status: "completed" | "failed";
   em: string;
   erro?: string;
+  /** Tempo total desta operação do ponto de vista do navegador (inclui rede + tudo que o
+   *  servidor levou) — ausente se a operação nunca chegou a "processing" com um horário de
+   *  início registrado. */
+  duracaoMs?: number;
+  /** Quantas chamadas ao Google essa operação disparou no servidor — vem em
+   *  `resultado.diagnostico`, quando a operação devolve isso (exportarPeca/sincronizarAutos). */
+  totalRequisicoes?: number;
+  /** Tempo de cada etapa interna no servidor (ex.: "criar documento individual"), na mesma
+   *  fonte acima — ajuda a identificar qual passo específico é o gargalo. */
+  etapas?: EtapaMedida[];
 };
 
 const HISTORICO_MAX = 30;
+
+/** As respostas de exportarPeca/sincronizarAutos trazem `diagnostico` (Prioridade 10) —
+ *  extrai isso do resultado sem assumir a forma inteira da resposta (tipos diferentes por
+ *  tipo de operação). */
+function extrairDiagnostico(
+  resultado: unknown,
+): { totalRequisicoes: number; etapas: EtapaMedida[] } | undefined {
+  if (
+    resultado &&
+    typeof resultado === "object" &&
+    "diagnostico" in resultado &&
+    resultado.diagnostico &&
+    typeof resultado.diagnostico === "object"
+  ) {
+    const d = resultado.diagnostico as { totalRequisicoes?: unknown; etapas?: unknown };
+    if (typeof d.totalRequisicoes === "number" && Array.isArray(d.etapas)) {
+      return { totalRequisicoes: d.totalRequisicoes, etapas: d.etapas as EtapaMedida[] };
+    }
+  }
+  return undefined;
+}
 
 const MAX_TENTATIVAS = 5;
 const BACKOFF_BASE_MS = 2000;
@@ -208,6 +245,7 @@ class FilaSincronizacao {
         if (!op) break;
 
         op.status = "processing";
+        op.iniciadoEm = new Date().toISOString();
         this.definirStatusAlvo(op.alvo, {
           status: "processing",
           atualizadoEm: new Date().toISOString(),
@@ -219,6 +257,7 @@ class FilaSincronizacao {
           this.fila = this.fila.filter((o) => o.id !== op.id);
           const agora = new Date().toISOString();
           this.ultimoSucesso = agora;
+          const diag = extrairDiagnostico(resultado);
           this.registrarHistorico({
             id: op.id,
             tipo: op.tipo,
@@ -226,6 +265,9 @@ class FilaSincronizacao {
             sindicanciaId: op.sindicanciaId,
             status: "completed",
             em: agora,
+            duracaoMs: op.iniciadoEm ? Date.parse(agora) - Date.parse(op.iniciadoEm) : undefined,
+            totalRequisicoes: diag?.totalRequisicoes,
+            etapas: diag?.etapas,
           });
           this.definirStatusAlvo(op.alvo, {
             status: "completed",
@@ -248,6 +290,9 @@ class FilaSincronizacao {
               status: "failed",
               em: op.ultimaTentativa,
               erro: op.erro,
+              duracaoMs: op.iniciadoEm
+                ? Date.parse(op.ultimaTentativa) - Date.parse(op.iniciadoEm)
+                : undefined,
             });
             this.definirStatusAlvo(op.alvo, {
               status: "failed",
