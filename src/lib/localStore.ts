@@ -13,9 +13,10 @@
  */
 
 const DB_NOME = "sindicancia-local";
-const DB_VERSAO = 1;
+const DB_VERSAO = 2;
 const STORE_RASCUNHOS = "rascunhos";
 const STORE_FILA = "fila-sync";
+const STORE_CACHE = "cache";
 
 function suportado(): boolean {
   return typeof indexedDB !== "undefined";
@@ -35,6 +36,9 @@ function abrirDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_FILA)) {
         db.createObjectStore(STORE_FILA, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_CACHE)) {
+        db.createObjectStore(STORE_CACHE, { keyPath: "chave" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -138,5 +142,45 @@ export async function apagarOperacaoPersistida(id: string): Promise<void> {
   } catch {
     // Ignora — na pior hipótese a operação concluída fica órfã na fila persistida e é
     // reprocessada (idempotente) na próxima hidratação; não trava o app.
+  }
+}
+
+// ==================================================================================
+// Cache local da planilha (Google Sheets)
+// ==================================================================================
+
+/** Última leitura bem-sucedida da planilha, guardada para o dashboard continuar
+ *  funcionando (em modo somente-leitura) quando o Google estiver indisponível. */
+export type CacheSindicancias<T> = {
+  chave: string;
+  itens: T[];
+  atualizadoEm: string;
+};
+
+const CHAVE_CACHE_SINDICANCIAS = "sindicancias";
+
+export async function salvarCacheSindicancias<T>(itens: T[]): Promise<void> {
+  if (!suportado()) return;
+  try {
+    await comStore(STORE_CACHE, "readwrite", (s) =>
+      s.put({
+        chave: CHAVE_CACHE_SINDICANCIAS,
+        itens,
+        atualizadoEm: new Date().toISOString(),
+      }),
+    );
+  } catch (e) {
+    console.warn("Não foi possível guardar o cache local da planilha:", e);
+  }
+}
+
+export async function lerCacheSindicancias<T>(): Promise<CacheSindicancias<T> | undefined> {
+  if (!suportado()) return undefined;
+  try {
+    return await comStore<CacheSindicancias<T> | undefined>(STORE_CACHE, "readonly", (s) =>
+      s.get(CHAVE_CACHE_SINDICANCIAS),
+    );
+  } catch {
+    return undefined;
   }
 }
