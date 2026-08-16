@@ -49,14 +49,14 @@ export function GuiaDocumento({
   const sincronizando = statusSync?.status === "processing" || statusSync?.status === "retrying";
 
   return (
-    <div className="painel flex h-fit flex-col gap-1 p-3 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+    <div className="painel flex flex-col gap-1 p-3">
       <div className="flex items-center gap-1.5 px-1 pb-1">
         <AlignLeft className="size-3.5 text-muted-foreground" />
         <h2 className="rotulo">Guia do documento</h2>
       </div>
 
       {autosUrl && (
-        <a
+        
           href={autosUrl}
           target="_blank"
           rel="noreferrer"
@@ -118,7 +118,7 @@ export function GuiaDocumento({
                   >
                     {d.tituloInterno || d.titulo}
                   </button>
-                  <a
+                  
                     href={d.url}
                     target="_blank"
                     rel="noreferrer"
