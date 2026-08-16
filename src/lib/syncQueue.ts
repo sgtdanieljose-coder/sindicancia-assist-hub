@@ -282,9 +282,13 @@ class FilaSincronizacao {
 
   private async processar(): Promise<void> {
     if (this.processando) return;
+    // Sem rede: não adianta gastar tentativas — as operações ficam pendentes (e persistidas)
+    // e o listener de "online" retoma tudo sozinho assim que a conexão voltar.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
     this.processando = true;
     try {
       for (;;) {
+        if (typeof navigator !== "undefined" && navigator.onLine === false) break;
         const op = this.proximaOperacao();
         if (!op) break;
 
