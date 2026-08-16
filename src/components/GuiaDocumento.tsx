@@ -56,7 +56,7 @@ export function GuiaDocumento({
       </div>
 
       {autosUrl && (
-        
+        <a
           href={autosUrl}
           target="_blank"
           rel="noreferrer"
@@ -118,7 +118,7 @@ export function GuiaDocumento({
                   >
                     {d.tituloInterno || d.titulo}
                   </button>
-                  
+                  <a
                     href={d.url}
                     target="_blank"
                     rel="noreferrer"
