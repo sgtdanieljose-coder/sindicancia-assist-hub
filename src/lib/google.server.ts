@@ -36,6 +36,93 @@ function mensagemErroGoogle(status: number, corpo: string): string {
   return `[${status}] Google API: ${corpo.slice(0, 300)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Controle de taxa + backoff exponencial
+// ---------------------------------------------------------------------------
+// Objetivo: reduzir falhas quando o Google/gateway está instável (429/5xx/rede).
+// - No máximo MAX_CONCORRENTES chamadas simultâneas.
+// - Intervalo mínimo INTERVALO_MIN_MS entre disparos (suaviza rajadas).
+// - Até MAX_TENTATIVAS com espera exponencial + jitter; respeita Retry-After.
+
+const MAX_CONCORRENTES = 4;
+const INTERVALO_MIN_MS = 120;
+const MAX_TENTATIVAS = 4;
+const ESPERA_BASE_MS = 500;
+const ESPERA_MAX_MS = 8000;
+
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+let emVoo = 0;
+let ultimoDisparo = 0;
+const fila: Array<() => void> = [];
+
+function liberarVaga() {
+  emVoo -= 1;
+  const proximo = fila.shift();
+  if (proximo) proximo();
+}
+
+async function adquirirVaga(): Promise<void> {
+  if (emVoo >= MAX_CONCORRENTES) {
+    await new Promise<void>((resolve) => fila.push(resolve));
+  }
+  emVoo += 1;
+  const agora = Date.now();
+  const espera = ultimoDisparo + INTERVALO_MIN_MS - agora;
+  if (espera > 0) await dormir(espera);
+  ultimoDisparo = Date.now();
+}
+
+function deveTentarNovamente(status: number) {
+  return status === 429 || status === 408 || status >= 500;
+}
+
+function esperaBackoff(tentativa: number, retryAfter?: string | null) {
+  if (retryAfter) {
+    const segundos = Number(retryAfter);
+    if (Number.isFinite(segundos) && segundos > 0) return Math.min(segundos * 1000, 30000);
+  }
+  const base = Math.min(ESPERA_BASE_MS * 2 ** tentativa, ESPERA_MAX_MS);
+  return base + Math.random() * 250;
+}
+
+/** Executa a chamada HTTP ao gateway com limite de taxa e retentativas. */
+async function chamarGateway(
+  url: string,
+  opcoes: RequestInit,
+  descricao: string,
+): Promise<Response> {
+  let ultimoErro: unknown;
+  for (let tentativa = 0; tentativa < MAX_TENTATIVAS; tentativa += 1) {
+    await adquirirVaga();
+    contadorRequisicoes += 1;
+    try {
+      const res = await fetch(url, opcoes);
+      liberarVaga();
+      if (res.ok || !deveTentarNovamente(res.status) || tentativa === MAX_TENTATIVAS - 1) {
+        return res;
+      }
+      const espera = esperaBackoff(tentativa, res.headers.get("retry-after"));
+      console.warn(
+        `Gateway ${descricao} [${res.status}] — nova tentativa em ${Math.round(espera)}ms (${tentativa + 1}/${MAX_TENTATIVAS})`,
+      );
+      await dormir(espera);
+    } catch (erro) {
+      liberarVaga();
+      ultimoErro = erro;
+      if (tentativa === MAX_TENTATIVAS - 1) break;
+      const espera = esperaBackoff(tentativa);
+      console.warn(
+        `Gateway ${descricao} falhou na rede — nova tentativa em ${Math.round(espera)}ms (${tentativa + 1}/${MAX_TENTATIVAS})`,
+      );
+      await dormir(espera);
+    }
+  }
+  throw ultimoErro instanceof Error
+    ? ultimoErro
+    : new Error(`Falha de rede ao contatar o Google (${descricao}).`);
+}
+
 export async function gw<T = unknown>(
   connector: Connector,
   path: string,
@@ -48,16 +135,19 @@ export async function gw<T = unknown>(
   }
 
   const qs = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
-  contadorRequisicoes += 1;
-  const res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
-    method: init.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${lovableKey}`,
-      "X-Connection-Api-Key": connKey,
-      "Content-Type": "application/json",
+  const res = await chamarGateway(
+    `${GATEWAY}/${connector}${path}${qs}`,
+    {
+      method: init.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${lovableKey}`,
+        "X-Connection-Api-Key": connKey,
+        "Content-Type": "application/json",
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
     },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-  });
+    `${connector} ${path}`,
+  );
 
   if (!res.ok) {
     const text = await res.text();
@@ -80,16 +170,19 @@ export async function gwRaw(
     throw new Error(`Conexão Google indisponível (${connector}). Reconecte o Google Workspace.`);
   }
   const qs = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
-  contadorRequisicoes += 1;
-  const res = await fetch(`${GATEWAY}/${connector}${path}${qs}`, {
-    method: init.method,
-    headers: {
-      Authorization: `Bearer ${lovableKey}`,
-      "X-Connection-Api-Key": connKey,
-      "Content-Type": init.contentType,
+  const res = await chamarGateway(
+    `${GATEWAY}/${connector}${path}${qs}`,
+    {
+      method: init.method,
+      headers: {
+        Authorization: `Bearer ${lovableKey}`,
+        "X-Connection-Api-Key": connKey,
+        "Content-Type": init.contentType,
+      },
+      body: init.body,
     },
-    body: init.body,
-  });
+    `${connector} ${path}`,
+  );
   if (!res.ok) {
     const text = await res.text();
     console.error(`Gateway ${connector} ${path} falhou [${res.status}]: ${text}`);
@@ -97,6 +190,7 @@ export async function gwRaw(
   }
   return (await res.json()) as Record<string, unknown>;
 }
+
 
 export const SPREADSHEET_ID = "1Fy-JSNpRJXKE89Wm--zo0cFPJwU1Daf_ygUg78-s1jI";
 export const DRIVE_FOLDER_ID = "1zcQGM4T6-PAiEttCAdK6aqNBrUnQ-u6G";
