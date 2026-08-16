@@ -75,9 +75,7 @@ export function useSyncQueue() {
 
   const reenfileirar = useCallback((alvo: string) => filaSync.reenfileirar(alvo), []);
 
-  const reenfileirarTodasComErro = useCallback(() => {
-    fila.filter((o) => o.status === "failed").forEach((o) => filaSync.reenfileirar(o.alvo));
-  }, [fila]);
+  const reenfileirarTodasComErro = useCallback(() => filaSync.reprocessarFalhas(), []);
 
   const pendencias = fila.filter((o) => o.status !== "completed").length;
 
