@@ -325,6 +325,18 @@ export const PECAS = [
     etapa: "Alegações finais",
   },
   { id: "prorrogacao", nome: "Pedido de Prorrogação de Prazo", unica: false, etapa: undefined },
+  // "relatorio" é tratado como Documento Final (não uma peça comum) em routes/pecas.tsx —
+  // ver o filtro por id === "relatorio" ao montar os grupos do seletor. Cadastrá-lo aqui
+  // (em vez de deixá-lo como pecaId avulso) é o que permite ao GuiaDocumento reconhecê-lo
+  // como editável, ao validarAutos cobrá-lo como peça obrigatória antes de finalizar, e ao
+  // link "Corrigir" apontar para a página certa — sem isso, os três ficavam quietamente
+  // sem efeito para o relatório.
+  {
+    id: "relatorio",
+    nome: "Relatório do Sindicante",
+    unica: true,
+    etapa: "Relatório do Sindicante",
+  },
 ] as const;
 
 export type PecaId = (typeof PECAS)[number]["id"];
