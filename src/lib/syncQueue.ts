@@ -123,6 +123,8 @@ function extrairDiagnostico(
 const MAX_TENTATIVAS = 5;
 const BACKOFF_BASE_MS = 2000;
 const BACKOFF_MAX_MS = 30000;
+/** De quanto em quanto tempo a fila tenta sozinha reprocessar o que falhou. */
+const RETOMADA_INTERVALO_MS = 60000;
 
 type Ouvinte = () => void;
 
@@ -134,16 +136,58 @@ class FilaSincronizacao {
   private hidratacao: Promise<void> | null = null;
   private historico: EntradaHistorico[] = [];
   private ultimoSucesso: string | undefined;
+  private retomadaInstalada = false;
 
   /** Compatível com useSyncExternalStore: registra o ouvinte e dispara a hidratação (lazy,
    *  só roda 1x) a partir da fila persistida no IndexedDB. */
   subscribe = (ouvinte: Ouvinte): (() => void) => {
     this.ouvintes.add(ouvinte);
+    this.instalarRetomadaAutomatica();
     void this.hidratar();
     return () => {
       this.ouvintes.delete(ouvinte);
     };
   };
+
+  /** Retomada automática (Prioridade 1.3): quando a conexão volta, quando a aba volta ao
+   *  foco, ou a cada RETOMADA_INTERVALO_MS, tudo que ficou como "failed" (Google fora do ar,
+   *  429, queda de rede) volta para a fila sozinho — o usuário não precisa clicar em nada e
+   *  nenhuma alteração é perdida enquanto isso (fica persistida no IndexedDB). */
+  private instalarRetomadaAutomatica() {
+    if (this.retomadaInstalada || typeof window === "undefined") return;
+    this.retomadaInstalada = true;
+
+    const retomar = () => {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      this.reprocessarFalhas();
+      void this.processar();
+    };
+
+    window.addEventListener("online", retomar);
+    window.addEventListener("focus", retomar);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") retomar();
+    });
+    window.setInterval(retomar, RETOMADA_INTERVALO_MS);
+  }
+
+  /** Devolve à fila todas as operações que esgotaram as tentativas. */
+  reprocessarFalhas() {
+    let mudou = false;
+    for (const op of this.fila) {
+      if (op.status !== "failed") continue;
+      op.status = "pending";
+      op.tentativas = 0;
+      op.erro = undefined;
+      this.statusPorAlvo.set(op.alvo, {
+        status: "pending",
+        atualizadoEm: new Date().toISOString(),
+      });
+      void salvarOperacaoPersistida(op);
+      mudou = true;
+    }
+    if (mudou) this.notificar();
+  }
 
   obterInstantaneo = (): OperacaoSync[] => this.fila;
 
@@ -238,9 +282,13 @@ class FilaSincronizacao {
 
   private async processar(): Promise<void> {
     if (this.processando) return;
+    // Sem rede: não adianta gastar tentativas — as operações ficam pendentes (e persistidas)
+    // e o listener de "online" retoma tudo sozinho assim que a conexão voltar.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
     this.processando = true;
     try {
       for (;;) {
+        if (typeof navigator !== "undefined" && navigator.onLine === false) break;
         const op = this.proximaOperacao();
         if (!op) break;
 
