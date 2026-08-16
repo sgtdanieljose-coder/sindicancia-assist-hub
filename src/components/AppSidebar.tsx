@@ -4,7 +4,6 @@ import {
   BarChart3,
   FileSignature,
   FolderOpen,
-  Map,
   Activity,
   Shield,
 } from "lucide-react";
@@ -25,8 +24,7 @@ const itens = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Gráficos", url: "/graficos", icon: BarChart3 },
   { title: "Peças e Relatório", url: "/pecas", icon: FileSignature },
-  { title: "Autos e Documentos", url: "/documentos", icon: FolderOpen },
-  { title: "Mapa dos Autos", url: "/mapa", icon: Map },
+  { title: "Autos da Sindicância", url: "/documentos", icon: FolderOpen },
   { title: "Saúde da Sincronização", url: "/sincronizacao", icon: Activity },
 ];
 
