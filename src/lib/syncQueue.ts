@@ -123,6 +123,8 @@ function extrairDiagnostico(
 const MAX_TENTATIVAS = 5;
 const BACKOFF_BASE_MS = 2000;
 const BACKOFF_MAX_MS = 30000;
+/** De quanto em quanto tempo a fila tenta sozinha reprocessar o que falhou. */
+const RETOMADA_INTERVALO_MS = 60000;
 
 type Ouvinte = () => void;
 
