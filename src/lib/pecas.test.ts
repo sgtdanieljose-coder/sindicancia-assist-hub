@@ -49,6 +49,7 @@ const TITULOS_PECA: Record<PecaId, string> = {
   encerramento: "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
   alegacoes: "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
   prorrogacao: "PEDIDO DE PRORROGAÇÃO DE PRAZO",
+  relatorio: "RELATÓRIO DO SINDICANTE",
 };
 
 const SINDICANCIA: Sindicancia = {
@@ -140,6 +141,10 @@ function indiceTitulo(texto: string, titulo: string) {
 }
 
 const ids = PECAS.map((p) => p.id);
+// "relatorio" está em PECAS (ver comentário em pecas.ts) mas é gerado por gerarRelatorio,
+// não por gerarPeca — os testes abaixo que chamam gerarPeca(id, ...) usam esta lista sem
+// ele; gerarRelatorio tem sua própria describe() mais abaixo.
+const idsGerarPeca = ids.filter((id) => id !== "relatorio");
 
 describe("gerarPeca — padrão EB10-IG-01.001", () => {
   it("cobre todas as peças cadastradas em PECAS", () => {
@@ -147,7 +152,7 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     for (const id of ids) expect(TITULOS_PECA[id]).toBeTruthy();
   });
 
-  it.each(ids)("%s: cabeçalho institucional no topo", (id) => {
+  it.each(idsGerarPeca)("%s: cabeçalho institucional no topo", (id) => {
     const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
     const primeiras = naoVazias(texto).slice(0, 3);
     expect(primeiras[0]).toBe("MINISTÉRIO DA DEFESA");
@@ -155,7 +160,7 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     expect(primeiras[2]).toBe(SINDICANCIA.subordinacao.toUpperCase());
   });
 
-  it.each(ids)("%s: título literal em caixa alta, em linha própria", (id) => {
+  it.each(idsGerarPeca)("%s: título literal em caixa alta, em linha própria", (id) => {
     const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
     const titulo = TITULOS_PECA[id];
     const i = indiceTitulo(texto, titulo);
@@ -178,7 +183,7 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     "prorrogacao",
   ];
 
-  it.each(ids.filter((id) => !COM_SUBCABECALHO.includes(id)))(
+  it.each(idsGerarPeca.filter((id) => !COM_SUBCABECALHO.includes(id)))(
     "%s: 4 linhas em branco entre cabeçalho e título",
     (id) => {
       const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
@@ -202,12 +207,15 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     expect(ls[i - 1]?.trim()).toBe(""); // linha em branco imediatamente antes do título
   });
 
-  it.each(ids.filter((id) => id !== "autos"))("%s: assinatura do sindicante ao final", (id) => {
-    const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
-    const ls = naoVazias(texto);
-    expect(ls.at(-1)).toBe("Sindicante");
-    expect(ls.at(-2)).toBe(SINDICANCIA.sindicante.toUpperCase());
-  });
+  it.each(idsGerarPeca.filter((id) => id !== "autos"))(
+    "%s: assinatura do sindicante ao final",
+    (id) => {
+      const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
+      const ls = naoVazias(texto);
+      expect(ls.at(-1)).toBe("Sindicante");
+      expect(ls.at(-2)).toBe(SINDICANCIA.sindicante.toUpperCase());
+    },
+  );
 
   it("capa dos Autos não é assinada e traz os dados essenciais do processo", () => {
     const texto = gerarPeca("autos", SINDICANCIA, CAMPOS);
@@ -218,12 +226,12 @@ describe("gerarPeca — padrão EB10-IG-01.001", () => {
     expect(texto).toContain(`OBJETO: ${SINDICANCIA.objeto}`);
   });
 
-  it.each(ids)("%s: não vaza undefined/null/NaN nem com dados completos", (id) => {
+  it.each(idsGerarPeca)("%s: não vaza undefined/null/NaN nem com dados completos", (id) => {
     const texto = gerarPeca(id, SINDICANCIA, CAMPOS);
     expect(texto).not.toMatch(/undefined|null|NaN|\[object Object\]/);
   });
 
-  it.each(ids)("%s: com base vazia gera lacunas em vez de valores inválidos", (id) => {
+  it.each(idsGerarPeca)("%s: com base vazia gera lacunas em vez de valores inválidos", (id) => {
     const texto = gerarPeca(id, SINDICANCIA_VAZIA, CAMPOS_VAZIOS);
     expect(texto).not.toMatch(/undefined|null|NaN|\[object Object\]/);
     expect(texto.trim().length).toBeGreaterThan(0);
