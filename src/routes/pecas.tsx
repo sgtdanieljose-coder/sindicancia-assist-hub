@@ -1,12 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { Wand2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -14,7 +18,16 @@ import { useSindicancias } from "@/components/SindicanciaContext";
 import { EditorPeca } from "@/components/EditorPeca";
 import { EditorJuntada } from "@/components/EditorJuntada";
 import { GuiaDocumento } from "@/components/GuiaDocumento";
-import { PECAS, RODAPE_DIEX_OPCOES, gerarPeca, type PecaCampos, type PecaId } from "@/lib/pecas";
+import {
+  PECAS,
+  RODAPE_DIEX_OPCOES,
+  gerarDiligenciasRealizadas,
+  gerarPeca,
+  gerarRelatorio,
+  type PecaCampos,
+  type PecaId,
+  type Relatorio,
+} from "@/lib/pecas";
 
 export const Route = createFileRoute("/pecas")({
   validateSearch: (search: Record<string, unknown>): { peca?: PecaId | "juntada" } => ({
@@ -26,22 +39,51 @@ export const Route = createFileRoute("/pecas")({
   }),
   head: () => ({
     meta: [
-      { title: "Gerador de Peças Jurídico-Administrativas | Sindicâncias EB" },
+      { title: "Peças e Relatório | Sindicâncias EB" },
       {
         name: "description",
         content:
-          "Gere termos, notificações, ofícios, DIEx e pedidos de prorrogação nos padrões da EB10-IG-01.001 e exporte diretamente para o Google Docs.",
+          "Gere termos, notificações, ofícios, DIEx, pedidos de prorrogação e o Relatório Final do Sindicante nos padrões da EB10-IG-01.001 e EB10-IG-09.001, com exportação direta para o Google Docs.",
       },
-      { property: "og:title", content: "Gerador de Peças — Sindicâncias EB" },
+      { property: "og:title", content: "Peças e Relatório — Sindicâncias EB" },
       {
         property: "og:description",
         content:
-          "Minutas de abertura, inquirição, juntada, DIEx, encerramento e prorrogação com exportação para Google Docs.",
+          "Minutas de abertura, inquirição, juntada, DIEx, encerramento, prorrogação e o Relatório do Sindicante, com exportação para Google Docs.",
       },
     ],
   }),
   component: Pecas,
 });
+
+/** As quatro partes obrigatórias do Relatório do Sindicante (EB10-IG-09.001) — mesma
+ *  definição que existia em routes/relatorio.tsx, agora exibida como o formulário do
+ *  item "Relatório do Sindicante" dentro deste gerador (grupo "Documento final" do
+ *  seletor de peça abaixo), em vez de numa página à parte. */
+const partesRelatorio: { key: keyof Relatorio; titulo: string; dica: string }[] = [
+  {
+    key: "introducao",
+    titulo: "1. INTRODUÇÃO",
+    dica: "Portaria de instauração, autoridade, objeto e designação do encarregado.",
+  },
+  {
+    key: "diligencias",
+    titulo: "2. DILIGÊNCIAS REALIZADAS",
+    dica: 'Relação cronológica dos atos (padrão do Anexo W da EB10-IG-09.001); use "Preencher com diligências" para montar a lista a partir dos despachos, DIEx/ofícios e juntadas já exportados, e ajuste o texto conforme necessário.',
+  },
+  {
+    key: "analise",
+    titulo: "3. ANÁLISE DOS FATOS",
+    dica: "Confronto das provas, enquadramento regulamentar e apreciação da conduta.",
+  },
+  {
+    key: "conclusao",
+    titulo: "4. CONCLUSÃO",
+    dica: "Resposta objetiva ao objeto, autoria/materialidade e sugestões à autoridade.",
+  },
+];
+
+const relatorioVazio: Relatorio = { introducao: "", diligencias: "", analise: "", conclusao: "" };
 
 const camposVazios: PecaCampos = {
   local: "",
@@ -241,14 +283,23 @@ function Pecas() {
   const buscaUrl = Route.useSearch();
   const [peca, setPeca] = useState<PecaId | "juntada">(buscaUrl.peca ?? "abertura");
   const [campos, setCampos] = useState<PecaCampos>(camposVazios);
+  // Estado do Relatório do Sindicante (Documento final) — mesmos três campos que existiam
+  // em routes/relatorio.tsx, só que vivendo aqui agora. Como as demais peças, não é limpo
+  // ao trocar de item no seletor (mesmo comportamento de `campos` acima).
+  const [rel, setRel] = useState<Relatorio>(relatorioVazio);
+  const [relLocal, setRelLocal] = useState("");
+  const [relData, setRelData] = useState(new Date().toISOString().slice(0, 10));
   const [texto, setTexto] = useState("");
 
   const ehJuntada = peca === "juntada";
+  const ehRelatorio = peca === "relatorio";
 
-  const gerado = useMemo(
-    () => (selecionada && !ehJuntada ? gerarPeca(peca, selecionada, campos) : ""),
-    [peca, ehJuntada, selecionada, campos],
-  );
+  const gerado = useMemo(() => {
+    if (!selecionada || ehJuntada) return "";
+    return ehRelatorio
+      ? gerarRelatorio(selecionada, rel, relLocal, relData)
+      : gerarPeca(peca, selecionada, campos);
+  }, [peca, ehJuntada, ehRelatorio, selecionada, campos, rel, relLocal, relData]);
 
   useEffect(() => setTexto(gerado), [gerado]);
 
@@ -286,9 +337,10 @@ function Pecas() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">
       <header className="min-w-0">
-        <h1 className="font-serif text-2xl font-semibold">Gerador Dinâmico de Peças</h1>
+        <h1 className="font-serif text-2xl font-semibold">Peças e Relatório</h1>
         <p className="text-sm text-muted-foreground">
-          Textos pré-formatados conforme as normas de redação oficial EB10-IG-01.001.
+          Textos pré-formatados conforme a EB10-IG-01.001, e o Relatório Final do Sindicante
+          conforme a EB10-IG-09.001 — selecione abaixo o que deseja produzir.
         </p>
       </header>
 
@@ -325,12 +377,19 @@ function Pecas() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PECAS.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.nome}
-                  </SelectItem>
-                ))}
-                <SelectItem value="juntada">Juntada de Documentos</SelectItem>
+                <SelectGroup>
+                  <SelectLabel>Peças</SelectLabel>
+                  {PECAS.filter((p) => p.id !== "relatorio").map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.nome}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="juntada">Juntada de Documentos</SelectItem>
+                </SelectGroup>
+                <SelectGroup>
+                  <SelectLabel>Documento final</SelectLabel>
+                  <SelectItem value="relatorio">Relatório do Sindicante</SelectItem>
+                </SelectGroup>
               </SelectContent>
             </Select>
           </div>
@@ -340,6 +399,50 @@ function Pecas() {
               Crie ou selecione uma juntada, edite o texto livre e anexe fotos/PDFs no painel ao
               lado.
             </p>
+          ) : ehRelatorio ? (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Local</Label>
+                  <Input value={relLocal} onChange={(e) => setRelLocal(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Data</Label>
+                  <Input type="date" value={relData} onChange={(e) => setRelData(e.target.value)} />
+                </div>
+              </div>
+
+              {partesRelatorio.map((p) => (
+                <div key={p.key} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>{p.titulo}</Label>
+                    {p.key === "diligencias" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5 text-xs"
+                        onClick={() =>
+                          setRel((r) => ({
+                            ...r,
+                            diligencias: gerarDiligenciasRealizadas(selecionada),
+                          }))
+                        }
+                      >
+                        <Wand2 className="size-3.5" />
+                        Preencher com diligências
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{p.dica}</p>
+                  <Textarea
+                    className="min-h-32"
+                    value={rel[p.key]}
+                    onChange={(e) => setRel((r) => ({ ...r, [p.key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </>
           ) : (
             <>
               {nota && (
