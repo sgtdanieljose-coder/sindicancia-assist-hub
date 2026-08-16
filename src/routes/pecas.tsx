@@ -344,7 +344,7 @@ function Pecas() {
         </p>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
         <div className="flex h-fit flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <GuiaDocumento
             sindicanciaId={selecionada.id}
@@ -415,7 +415,7 @@ function Pecas() {
 
                 {partesRelatorio.map((p) => (
                   <div key={p.key} className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <Label>{p.titulo}</Label>
                       {p.key === "diligencias" && (
                         <Button
