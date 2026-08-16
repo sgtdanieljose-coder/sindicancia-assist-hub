@@ -34,6 +34,7 @@ const PECAS_OBRIGATORIAS_IDS = [
   "depoimento",
   "encerramento",
   "alegacoes",
+  "relatorio",
 ];
 
 function comTodasPecasObrigatorias(s: Sindicancia): Sindicancia {
