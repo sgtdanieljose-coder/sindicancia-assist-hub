@@ -1,19 +1,15 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, type DragEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowDown,
   ArrowUp,
-  Check,
   ExternalLink,
-  Eye,
   FolderOpen,
   GripVertical,
-  History,
   Loader2,
   Paperclip,
-  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -38,22 +34,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSindicancias } from "@/components/SindicanciaContext";
-import { HistoricoVersoesDialog } from "@/components/HistoricoVersoesDialog";
 import { SeletorAnexos } from "@/components/SeletorAnexos";
 import { PainelValidacao } from "@/components/PainelValidacao";
 import { FinalizarAutosDialog } from "@/components/FinalizarAutosDialog";
+import { DetalhePecaDialog } from "@/components/DetalhePecaDialog";
+import { VisaoMapaAutos } from "@/components/VisaoMapaAutos";
+import { BadgeSincronizacao } from "@/components/BadgeSincronizacao";
 import { atualizarStatusPeca, criarJuntada, reordenarPecas } from "@/lib/sindicancias.functions";
-import { tipoDoItem, formatarDataHora } from "@/lib/documentos-format";
+import { tipoDoItem, formatarDataHora, type DocumentoItem } from "@/lib/documentos-format";
 import type { ItemValidacao } from "@/lib/validacao";
-import {
-  PECAS,
-  STATUS_PECA,
-  STATUS_PECA_LABEL,
-  STATUS_JUNTADA_LABEL,
-  type Sindicancia,
-  type StatusPeca,
-} from "@/lib/pecas";
+import { STATUS_PECA, STATUS_PECA_LABEL, STATUS_JUNTADA_LABEL, type StatusPeca } from "@/lib/pecas";
 import { useStatusSincronizacao, useSyncQueue, alvoAutos, alvoPeca } from "@/hooks/useSyncQueue";
 
 const PASTA_DRIVE = "https://drive.google.com/drive/folders/1zcQGM4T6-PAiEttCAdK6aqNBrUnQ-u6G";
@@ -61,45 +53,33 @@ const PLANILHA =
   "https://docs.google.com/spreadsheets/d/1Fy-JSNpRJXKE89Wm--zo0cFPJwU1Daf_ygUg78-s1jI/edit";
 
 export const Route = createFileRoute("/documentos")({
+  validateSearch: (search: Record<string, unknown>): { visao?: "lista" | "mapa" } => ({
+    visao: search.visao === "lista" || search.visao === "mapa" ? search.visao : undefined,
+  }),
   head: () => ({
     meta: [
-      { title: "Autos e Documentos | Sindicâncias EB" },
+      { title: "Autos da Sindicância | Sindicâncias EB" },
       {
         name: "description",
         content:
-          "Índice das peças da sindicância: status, ordem nos autos, busca, filtros e histórico — sem depender de abrir o Google Docs para consultar.",
+          "Autos completos da sindicância em duas visualizações: lista (status, ordem, busca, filtros e histórico) e mapa (checklist resumido e imprimível) — sem depender de abrir o Google Docs para consultar.",
       },
-      { property: "og:title", content: "Autos e Documentos — Sindicâncias EB" },
+      { property: "og:title", content: "Autos da Sindicância — Sindicâncias EB" },
       {
         property: "og:description",
-        content: "Índice processual das peças, juntadas e anexos vinculados ao NUP.",
+        content: "Índice processual das peças, juntadas e anexos, com lista e mapa dos autos.",
       },
     ],
   }),
   component: Documentos,
 });
 
-type DocumentoItem = Sindicancia["documentos"][number];
-
-/** Badge de status de sincronização com o Google (fila) — mesma linguagem visual usada em
- *  EditorPeca.tsx e GuiaDocumento.tsx, aqui aplicada por linha do índice. */
-function BadgeSincronizacao({ alvo }: { alvo: string }) {
-  const status = useStatusSincronizacao(alvo);
-  if (!status) return <span className="text-[11px] text-muted-foreground">—</span>;
-  const mapa: Record<string, { texto: string; className: string }> = {
-    pending: { texto: "🟡 Pendente", className: "text-amber-600" },
-    processing: { texto: "🔄 Sincronizando", className: "text-muted-foreground" },
-    retrying: { texto: "🔄 Tentando de novo", className: "text-amber-600" },
-    completed: { texto: "🟢 Sincronizado", className: "text-green-600" },
-    failed: { texto: "🔴 Erro", className: "text-destructive" },
-  };
-  const info = mapa[status.status];
-  return <span className={`text-[11px] ${info.className}`}>{info.texto}</span>;
-}
-
 function Documentos() {
+  const buscaUrl = Route.useSearch();
+  const visao = buscaUrl.visao ?? "lista";
+  const navigate = useNavigate();
   const { itens, selecionada, setSelecionadaId, recarregar } = useSindicancias();
-  const { enfileirarExportarPeca, enfileirarSincronizarAutos, fila } = useSyncQueue();
+  const { enfileirarSincronizarAutos, fila } = useSyncQueue();
 
   const [dialogo, setDialogo] = useState(false);
   const [validacaoAberta, setValidacaoAberta] = useState(false);
@@ -113,12 +93,17 @@ function Documentos() {
   const [filtroTipo, setFiltroTipo] = useState<string>("todos");
 
   // Prioridade 2.5 — painel de visualização interna (em vez de abrir o Google Docs direto).
-  const [pecaAberta, setPecaAberta] = useState<DocumentoItem | null>(null);
-  const [mostrarPreview, setMostrarPreview] = useState(false);
-  const [historicoAberto, setHistoricoAberto] = useState(false);
+  // Guarda só o id, não o objeto: `pecaAberta` abaixo é derivado de `documentos` a cada
+  // render, então acompanha sozinho qualquer atualização vinda de recarregar() (mudar o
+  // status, por exemplo) sem precisar de nenhum código extra para "sincronizar" o painel.
+  const [pecaAbertaId, setPecaAbertaId] = useState<string | null>(null);
 
   const juntadas = selecionada?.juntadas ?? [];
   const documentos = useMemo(() => selecionada?.documentos ?? [], [selecionada]);
+  const pecaAberta = documentos.find((d) => d.documentId === pecaAbertaId) ?? null;
+  const posicaoAberta = pecaAbertaId
+    ? documentos.findIndex((d) => d.documentId === pecaAbertaId) + 1
+    : 0;
 
   const tiposDisponiveis = useMemo(
     () => Array.from(new Set(documentos.map((d) => tipoDoItem(d)))).sort(),
@@ -188,14 +173,7 @@ function Documentos() {
       atualizarStatusPeca({
         data: { sindicanciaId: selecionada!.id, documentId: p.documentId, status: p.status },
       }),
-    onSuccess: (_r, variaveis) => {
-      setPecaAberta((atual) =>
-        atual && atual.documentId === variaveis.documentId
-          ? { ...atual, status: variaveis.status }
-          : atual,
-      );
-      recarregar();
-    },
+    onSuccess: recarregar,
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -241,12 +219,12 @@ function Documentos() {
     }));
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
-      <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:flex-wrap sm:justify-between">
+    <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6 print:max-w-full">
+      <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 sm:flex sm:flex-wrap sm:justify-between print:hidden">
         <div className="min-w-0">
-          <h1 className="truncate font-serif text-2xl font-semibold">Autos e Documentos</h1>
+          <h1 className="truncate font-serif text-2xl font-semibold">Autos da Sindicância</h1>
           <p className="text-sm text-muted-foreground">
-            Índice das peças desta sindicância — status, ordem, juntadas e anexos.
+            Lista dos autos ou mapa resumido — status, ordem, juntadas, anexos e histórico.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -296,8 +274,29 @@ function Documentos() {
         </div>
       </header>
 
+      <Tabs
+        value={visao}
+        onValueChange={(v) =>
+          navigate({ to: "/documentos", search: { visao: v as "lista" | "mapa" } })
+        }
+        className="print:hidden"
+      >
+        <TabsList>
+          <TabsTrigger value="lista" asChild>
+            <Link to="/documentos" search={{ visao: "lista" }}>
+              Lista dos Autos
+            </Link>
+          </TabsTrigger>
+          <TabsTrigger value="mapa" asChild>
+            <Link to="/documentos" search={{ visao: "mapa" }}>
+              Mapa dos Autos
+            </Link>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
       {itens.length > 1 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 print:hidden">
           {itens.map((i) => (
             <Button
               key={i.id}
@@ -311,7 +310,7 @@ function Documentos() {
         </div>
       )}
 
-      {selecionada && documentos.length > 0 && (
+      {visao === "lista" && selecionada && documentos.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           {statusAutos ? (
             <span className={`text-xs ${infoAutos[statusAutos.status]?.className ?? ""}`}>
@@ -331,7 +330,7 @@ function Documentos() {
         </div>
       )}
 
-      {selecionada && (selecionada.autosFinais?.length ?? 0) > 0 && (
+      {visao === "lista" && selecionada && (selecionada.autosFinais?.length ?? 0) > 0 && (
         <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted-foreground">
           <Lock className="size-3.5" />
           <span>Versões finalizadas:</span>
@@ -349,174 +348,180 @@ function Documentos() {
         </div>
       )}
 
+      {visao === "mapa" && selecionada && (
+        <VisaoMapaAutos sindicancia={selecionada} onAbrirPeca={setPecaAbertaId} />
+      )}
+      {visao === "mapa" && !selecionada && (
+        <p className="p-4 text-sm text-muted-foreground">Selecione uma sindicância.</p>
+      )}
+
       {/* Prioridade 2.1/2.4 — índice visual das peças, com busca e filtros. */}
-      <div className="painel space-y-3 p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[220px] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar por título ou nº de folha..."
-              className="h-8 pl-8 text-sm"
-            />
-          </div>
-          <Select
-            value={filtroStatus}
-            onValueChange={(v) => setFiltroStatus(v as StatusPeca | "todos")}
-          >
-            <SelectTrigger className="h-8 w-[170px] text-xs">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos os status</SelectItem>
-              {STATUS_PECA.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {STATUS_PECA_LABEL[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={filtroTipo} onValueChange={setFiltroTipo}>
-            <SelectTrigger className="h-8 w-[190px] text-xs">
-              <SelectValue placeholder="Tipo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos os tipos</SelectItem>
-              {tiposDisponiveis.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {filtrosAtivos && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => {
-                setBusca("");
-                setFiltroStatus("todos");
-                setFiltroTipo("todos");
-              }}
+      {visao === "lista" && (
+        <div className="painel space-y-3 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar por título ou nº de folha..."
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+            <Select
+              value={filtroStatus}
+              onValueChange={(v) => setFiltroStatus(v as StatusPeca | "todos")}
             >
-              Limpar filtros
-            </Button>
-          )}
-        </div>
-
-        {filtrosAtivos && (
-          <p className="text-xs text-muted-foreground">
-            Reordenar (arrastar/setas) fica disponível com os filtros limpos — a posição precisa
-            corresponder à lista completa dos autos.
-          </p>
-        )}
-
-        <ul className="divide-y divide-border">
-          {documentosFiltrados.map(({ item: d, posicao }) => (
-            <li
-              key={d.documentId}
-              draggable={!filtrosAtivos}
-              onDragStart={() => setArrastando(posicao - 1)}
-              onDragOver={(e: DragEvent) => e.preventDefault()}
-              onDrop={() => soltar(posicao - 1)}
-              className={`flex flex-wrap items-center gap-2 py-2.5 ${
-                arrastando === posicao - 1 ? "opacity-50" : ""
-              }`}
-            >
-              {!filtrosAtivos && (
-                <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
-                  <GripVertical className="size-4 cursor-grab" />
-                  <span className="flex flex-col">
-                    <button
-                      type="button"
-                      onClick={() => mover(posicao - 1, -1)}
-                      disabled={posicao === 1 || reordenar.isPending}
-                      className="disabled:opacity-30"
-                      title="Mover para cima"
-                    >
-                      <ArrowUp className="size-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => mover(posicao - 1, 1)}
-                      disabled={posicao === documentos.length || reordenar.isPending}
-                      className="disabled:opacity-30"
-                      title="Mover para baixo"
-                    >
-                      <ArrowDown className="size-3" />
-                    </button>
-                  </span>
-                </span>
-              )}
-
-              <button
+              <SelectTrigger className="h-8 w-[170px] text-xs">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os status</SelectItem>
+                {STATUS_PECA.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_PECA_LABEL[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filtroTipo} onValueChange={setFiltroTipo}>
+              <SelectTrigger className="h-8 w-[190px] text-xs">
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os tipos</SelectItem>
+                {tiposDisponiveis.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {filtrosAtivos && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
                 onClick={() => {
-                  setPecaAberta(d);
-                  setMostrarPreview(false);
+                  setBusca("");
+                  setFiltroStatus("todos");
+                  setFiltroTipo("todos");
                 }}
-                className="min-w-0 flex-1 text-left"
               >
-                <p className="truncate text-sm hover:text-primary">
-                  <span className="text-muted-foreground">Fls. {posicao} — </span>
-                  {d.titulo}
-                </p>
-                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                  <span>{tipoDoItem(d)}</span>
-                  <span>· últ. alteração {formatarDataHora(d.atualizadoEm)}</span>
-                </p>
-              </button>
+                Limpar filtros
+              </Button>
+            )}
+          </div>
 
-              <Select
-                value={d.status ?? "concluida"}
-                onValueChange={(v) =>
-                  atualizarStatus.mutate({ documentId: d.documentId, status: v as StatusPeca })
-                }
-              >
-                <SelectTrigger className="h-7 w-[150px] shrink-0 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_PECA.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {STATUS_PECA_LABEL[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <span className="w-[110px] shrink-0 text-right">
-                <BadgeSincronizacao
-                  alvo={alvoPeca(selecionada?.id ?? "", d.documentId, d.pecaId)}
-                />
-              </span>
-
-              <a
-                href={d.url}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 text-primary"
-                title="Abrir no Google Docs"
-              >
-                <ExternalLink className="size-4" />
-              </a>
-            </li>
-          ))}
-          {documentos.length === 0 && (
-            <li className="p-4 text-sm text-muted-foreground">
-              Nenhuma peça exportada até o momento.
-            </li>
+          {filtrosAtivos && (
+            <p className="text-xs text-muted-foreground">
+              Reordenar (arrastar/setas) fica disponível com os filtros limpos — a posição precisa
+              corresponder à lista completa dos autos.
+            </p>
           )}
-          {documentos.length > 0 && documentosFiltrados.length === 0 && (
-            <li className="p-4 text-sm text-muted-foreground">
-              Nenhuma peça corresponde à busca/filtros atuais.
-            </li>
-          )}
-        </ul>
-      </div>
 
-      <div className="painel space-y-3 p-4">
+          <ul className="divide-y divide-border">
+            {documentosFiltrados.map(({ item: d, posicao }) => (
+              <li
+                key={d.documentId}
+                draggable={!filtrosAtivos}
+                onDragStart={() => setArrastando(posicao - 1)}
+                onDragOver={(e: DragEvent) => e.preventDefault()}
+                onDrop={() => soltar(posicao - 1)}
+                className={`flex flex-wrap items-center gap-2 py-2.5 ${
+                  arrastando === posicao - 1 ? "opacity-50" : ""
+                }`}
+              >
+                {!filtrosAtivos && (
+                  <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
+                    <GripVertical className="size-4 cursor-grab" />
+                    <span className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => mover(posicao - 1, -1)}
+                        disabled={posicao === 1 || reordenar.isPending}
+                        className="disabled:opacity-30"
+                        title="Mover para cima"
+                      >
+                        <ArrowUp className="size-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => mover(posicao - 1, 1)}
+                        disabled={posicao === documentos.length || reordenar.isPending}
+                        className="disabled:opacity-30"
+                        title="Mover para baixo"
+                      >
+                        <ArrowDown className="size-3" />
+                      </button>
+                    </span>
+                  </span>
+                )}
+
+                <button
+                  onClick={() => setPecaAbertaId(d.documentId)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <p className="truncate text-sm hover:text-primary">
+                    <span className="text-muted-foreground">Fls. {posicao} — </span>
+                    {d.titulo}
+                  </p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <span>{tipoDoItem(d)}</span>
+                    <span>· últ. alteração {formatarDataHora(d.atualizadoEm)}</span>
+                  </p>
+                </button>
+
+                <Select
+                  value={d.status ?? "concluida"}
+                  onValueChange={(v) =>
+                    atualizarStatus.mutate({ documentId: d.documentId, status: v as StatusPeca })
+                  }
+                >
+                  <SelectTrigger className="h-7 w-[150px] shrink-0 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_PECA.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {STATUS_PECA_LABEL[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <span className="w-[110px] shrink-0 text-right">
+                  <BadgeSincronizacao
+                    alvo={alvoPeca(selecionada?.id ?? "", d.documentId, d.pecaId)}
+                  />
+                </span>
+
+                <a
+                  href={d.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 text-primary"
+                  title="Abrir no Google Docs"
+                >
+                  <ExternalLink className="size-4" />
+                </a>
+              </li>
+            ))}
+            {documentos.length === 0 && (
+              <li className="p-4 text-sm text-muted-foreground">
+                Nenhuma peça exportada até o momento.
+              </li>
+            )}
+            {documentos.length > 0 && documentosFiltrados.length === 0 && (
+              <li className="p-4 text-sm text-muted-foreground">
+                Nenhuma peça corresponde à busca/filtros atuais.
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+
+      <div className="painel space-y-3 p-4 print:hidden">
         <h2 className="rotulo">Juntadas e anexos</h2>
         {juntadas.length === 0 && (
           <p className="text-sm text-muted-foreground">
@@ -559,142 +564,18 @@ function Documentos() {
       </div>
 
       {/* Prioridade 2.5 — painel de visualização interna: metadados + ações, sem abrir o
-          Google Docs por padrão. */}
-      <Dialog
-        open={Boolean(pecaAberta)}
+          Google Docs por padrão. Extraído para DetalhePecaDialog.tsx para ser reaproveitado
+          também pela visão Mapa (visao === "mapa" acima). */}
+      <DetalhePecaDialog
+        sindicanciaId={selecionada?.id ?? ""}
+        peca={pecaAberta}
+        posicao={posicaoAberta}
+        aberto={Boolean(pecaAberta)}
         onOpenChange={(v) => {
-          if (!v) {
-            setPecaAberta(null);
-            setMostrarPreview(false);
-          }
+          if (!v) setPecaAbertaId(null);
         }}
-      >
-        <DialogContent className="max-w-2xl">
-          {pecaAberta && selecionada && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="pr-6">{pecaAberta.titulo}</DialogTitle>
-                <DialogDescription>
-                  {tipoDoItem(pecaAberta)} · Fls.{" "}
-                  {documentos.findIndex((d) => d.documentId === pecaAberta.documentId) + 1}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-                <p className="text-muted-foreground">Status</p>
-                <Select
-                  value={pecaAberta.status ?? "concluida"}
-                  onValueChange={(v) =>
-                    atualizarStatus.mutate({
-                      documentId: pecaAberta.documentId,
-                      status: v as StatusPeca,
-                    })
-                  }
-                >
-                  <SelectTrigger className="h-7 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_PECA.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {STATUS_PECA_LABEL[s]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground">Criada em</p>
-                <p>{formatarDataHora(pecaAberta.criadoEm)}</p>
-                <p className="text-muted-foreground">Última alteração</p>
-                <p>{formatarDataHora(pecaAberta.atualizadoEm)}</p>
-                <p className="text-muted-foreground">Sincronização</p>
-                <BadgeSincronizacao
-                  alvo={alvoPeca(selecionada.id, pecaAberta.documentId, pecaAberta.pecaId)}
-                />
-              </div>
-
-              <div className="flex flex-wrap gap-2 pt-1">
-                {!pecaAberta.pecaId?.startsWith("juntada-") && (
-                  <Button variant="outline" size="sm" asChild>
-                    <Link
-                      to="/pecas"
-                      search={{ peca: pecaAberta.pecaId as never }}
-                      onClick={() => setPecaAberta(null)}
-                    >
-                      <Pencil className="size-4" /> Editar peça
-                    </Link>
-                  </Button>
-                )}
-                {pecaAberta.pecaId?.startsWith("juntada-") && (
-                  <Button variant="outline" size="sm" asChild>
-                    <Link
-                      to="/pecas"
-                      search={{ peca: "juntada" }}
-                      onClick={() => setPecaAberta(null)}
-                    >
-                      <Pencil className="size-4" /> Editar juntada
-                    </Link>
-                  </Button>
-                )}
-                <Button variant="outline" size="sm" onClick={() => setMostrarPreview((v) => !v)}>
-                  <Eye className="size-4" /> {mostrarPreview ? "Ocultar" : "Visualizar"}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setHistoricoAberto(true)}>
-                  <History className="size-4" /> Histórico
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a href={pecaAberta.url} target="_blank" rel="noreferrer">
-                    <ExternalLink className="size-4" /> Abrir no Google Docs
-                  </a>
-                </Button>
-                {!pecaAberta.pecaId?.startsWith("juntada-") && pecaAberta.texto !== undefined && (
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      const base = pecaAberta.pecaId
-                        ? PECAS.find((p) => p.id === pecaAberta.pecaId)
-                        : undefined;
-                      enfileirarExportarPeca(
-                        {
-                          sindicanciaId: selecionada.id,
-                          titulo: pecaAberta.titulo,
-                          conteudo: pecaAberta.texto ?? "",
-                          pecaId: pecaAberta.pecaId,
-                          unica: base?.unica ?? false,
-                          etapa: base?.etapa,
-                        },
-                        { documentId: pecaAberta.documentId },
-                      );
-                      toast.success("Sincronização enfileirada");
-                    }}
-                  >
-                    <Check className="size-4" /> Sincronizar
-                  </Button>
-                )}
-              </div>
-
-              {mostrarPreview && (
-                <iframe
-                  title={pecaAberta.titulo}
-                  src={`https://docs.google.com/document/d/${pecaAberta.documentId}/preview`}
-                  className="h-[50vh] w-full rounded-md border border-border"
-                />
-              )}
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {pecaAberta && selecionada && (
-        <HistoricoVersoesDialog
-          sindicanciaId={selecionada.id}
-          documentId={pecaAberta.documentId}
-          pecaId={pecaAberta.pecaId}
-          aberto={historicoAberto}
-          onOpenChange={setHistoricoAberto}
-          textoAtual={pecaAberta.texto}
-          onAtualizado={recarregar}
-        />
-      )}
+        onAtualizado={recarregar}
+      />
 
       {selecionada && (
         <PainelValidacao
