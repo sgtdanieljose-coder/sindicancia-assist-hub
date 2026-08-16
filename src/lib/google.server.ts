@@ -765,7 +765,6 @@ const TITULOS_PECA: Partial<Record<string, string>> = {
   encerramento: "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
   alegacoes: "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
   prorrogacao: "PEDIDO DE PRORROGAÇÃO DE PRAZO",
-  // "relatorio" não está em PECAS (pecaId próprio, fixo, usado só em routes/relatorio.tsx).
   relatorio: "RELATÓRIO DO SINDICANTE",
 };
 
