@@ -1,6 +1,8 @@
+
+Supabase.server · TS
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DadoSindicado, Sindicancia } from "./pecas";
-
+ 
 // ---------------------------------------------------------------------------
 // Etapa 1 da migração do banco (Sheets -> Supabase). Este arquivo é o
 // equivalente, para o Supabase, da parte de leitura/escrita de dados que hoje
@@ -8,27 +10,28 @@ import type { DadoSindicado, Sindicancia } from "./pecas";
 // Dados_Sindicado). Docs e Drive continuam em google.server.ts, sem mudança —
 // aqui só entra o que era "linha de planilha".
 // ---------------------------------------------------------------------------
-
+ 
 let cliente: SupabaseClient | null = null;
-
+ 
 function obterCliente(): SupabaseClient {
   if (cliente) return cliente;
-  const url = process.env.SUPABASE_URL;
-  const chave = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.SUPA_API_URL;
+  const chave = process.env.SUPA_API_KEY;
   if (!url || !chave) {
     throw new Error(
-      "Supabase indisponível: defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nas variáveis de ambiente do projeto.",
+      "Supabase indisponível: defina SUPA_API_URL e SUPA_API_KEY nas variáveis de ambiente do projeto.",
     );
   }
-  // service role key: só usada aqui, no servidor — nunca é enviada ao navegador.
+  // secret key (sb_secret_...), equivalente à service_role: só usada aqui, no
+  // servidor — nunca é enviada ao navegador.
   cliente = createClient(url, chave, { auth: { persistSession: false } });
   return cliente;
 }
-
+ 
 // ====================================================================================
 // Tabela "sindicancias" — equivalente à aba Sindicancias.
 // ====================================================================================
-
+ 
 type LinhaSindicancia = {
   id: string;
   nup: string;
@@ -58,7 +61,7 @@ type LinhaSindicancia = {
   tags: string[];
   autos_finais: Sindicancia["autosFinais"];
 };
-
+ 
 function linhaParaSindicancia(l: LinhaSindicancia): Sindicancia {
   return {
     id: l.id,
@@ -90,7 +93,7 @@ function linhaParaSindicancia(l: LinhaSindicancia): Sindicancia {
     autosFinais: l.autos_finais ?? [],
   };
 }
-
+ 
 function sindicanciaParaLinha(s: Sindicancia): Omit<LinhaSindicancia, "atualizado_em"> {
   return {
     id: s.id,
@@ -121,7 +124,7 @@ function sindicanciaParaLinha(s: Sindicancia): Omit<LinhaSindicancia, "atualizad
     autos_finais: s.autosFinais ?? [],
   };
 }
-
+ 
 export async function listarSindicanciasDb(): Promise<Sindicancia[]> {
   const { data, error } = await obterCliente()
     .from("sindicancias")
@@ -130,7 +133,7 @@ export async function listarSindicanciasDb(): Promise<Sindicancia[]> {
   if (error) throw new Error(`Supabase (listar sindicâncias): ${error.message}`);
   return (data as LinhaSindicancia[]).map(linhaParaSindicancia);
 }
-
+ 
 export async function carregarSindicanciaDb(id: string): Promise<Sindicancia> {
   const { data, error } = await obterCliente()
     .from("sindicancias")
@@ -141,7 +144,7 @@ export async function carregarSindicanciaDb(id: string): Promise<Sindicancia> {
   if (!data) throw new Error("Sindicância não localizada.");
   return linhaParaSindicancia(data as LinhaSindicancia);
 }
-
+ 
 /** Upsert por id — cria se não existir, atualiza se existir. Substitui o par
  *  appendRow/updateRow do Sheets, e o "achar a linha antes de gravar". */
 export async function salvarSindicanciaDb(registro: Sindicancia): Promise<Sindicancia> {
@@ -154,12 +157,12 @@ export async function salvarSindicanciaDb(registro: Sindicancia): Promise<Sindic
   if (error) throw new Error(`Supabase (salvar sindicância): ${error.message}`);
   return linhaParaSindicancia(data as LinhaSindicancia);
 }
-
+ 
 // ====================================================================================
 // Tabela "sindicados" — equivalente à aba Dados_Sindicado. Agora com id próprio
 // (uuid) em vez de endereçamento por posição de linha ("linha").
 // ====================================================================================
-
+ 
 type LinhaSindicado = {
   id: string;
   sindicancia_id: string;
@@ -175,7 +178,7 @@ type LinhaSindicado = {
   companhia: string;
   vocativo: string;
 };
-
+ 
 function linhaParaSindicado(l: LinhaSindicado): DadoSindicado & { id: string } {
   return {
     id: l.id,
@@ -193,7 +196,7 @@ function linhaParaSindicado(l: LinhaSindicado): DadoSindicado & { id: string } {
     vocativo: l.vocativo,
   };
 }
-
+ 
 export async function listarSindicadosDb(
   sindicanciaId: string,
 ): Promise<(DadoSindicado & { id: string })[]> {
@@ -205,7 +208,7 @@ export async function listarSindicadosDb(
   if (error) throw new Error(`Supabase (listar sindicados): ${error.message}`);
   return (data as LinhaSindicado[]).map(linhaParaSindicado);
 }
-
+ 
 /** Cria (sem `id`) ou atualiza (com `id`) um sindicado. */
 export async function salvarSindicadoDb(
   dado: DadoSindicado & { id?: string },
@@ -224,7 +227,7 @@ export async function salvarSindicadoDb(
     companhia: dado.companhia,
     vocativo: dado.vocativo,
   };
-
+ 
   if (dado.id) {
     const { data, error } = await obterCliente()
       .from("sindicados")
@@ -235,13 +238,15 @@ export async function salvarSindicadoDb(
     if (error) throw new Error(`Supabase (atualizar sindicado): ${error.message}`);
     return linhaParaSindicado(data as LinhaSindicado);
   }
-
+ 
   const { data, error } = await obterCliente().from("sindicados").insert(linha).select().single();
   if (error) throw new Error(`Supabase (criar sindicado): ${error.message}`);
   return linhaParaSindicado(data as LinhaSindicado);
 }
-
+ 
 export async function removerSindicadoDb(id: string): Promise<void> {
   const { error } = await obterCliente().from("sindicados").delete().eq("id", id);
   if (error) throw new Error(`Supabase (remover sindicado): ${error.message}`);
 }
+ 
+
