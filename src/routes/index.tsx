@@ -562,7 +562,7 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
   });
 
   const remover = useMutation({
-    mutationFn: (linha: number) => removerSindicado({ data: { linha } }),
+    mutationFn: (id: string) => removerSindicado({ data: { id } }),
     onSuccess: () => {
       toast.success("Sindicado removido");
       refetch();
@@ -596,7 +596,7 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
         <div className="space-y-2">
           {sindicados.map((s) => (
             <div
-              key={s.linha}
+              key={s.id}
               className="flex items-center justify-between gap-3 rounded-md border border-border p-3"
             >
               <div className="min-w-0">
@@ -614,7 +614,7 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => s.linha && remover.mutate(s.linha)}
+                  onClick={() => s.id && remover.mutate(s.id)}
                   disabled={remover.isPending}
                 >
                   <Trash2 className="size-4" />
@@ -627,7 +627,7 @@ function PainelSindicados({ sindicanciaId }: { sindicanciaId?: string }) {
 
       {editando && (
         <div className="painel space-y-4 p-4 sm:p-5">
-          <h2 className="rotulo">{editando.linha ? "Editar sindicado" : "Novo sindicado"}</h2>
+          <h2 className="rotulo">{editando.id ? "Editar sindicado" : "Novo sindicado"}</h2>
 
           <div className="space-y-1.5">
             <Label>Militar ou Civil</Label>
