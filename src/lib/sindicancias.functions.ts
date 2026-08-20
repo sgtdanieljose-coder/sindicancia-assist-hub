@@ -625,7 +625,7 @@ export const restaurarVersao = createServerFn({ method: "POST" })
 
 /**
  * Reconstrói o documento único dos autos (repagina "Fls. N", reaplica formatação) a partir
- * do estado atual salvo na planilha — Prioridade 1.7/1.8 da evolução do sistema.
+ * do estado atual salvo no Supabase — Prioridade 1.7/1.8 da evolução do sistema.
  *
  * Antes, essa reconstrução rodava embutida (e duplicada 4x, com pequenas variações) dentro
  * de exportarParaDocs, sincronizarDocumentoJuntada, desfazerInsercao e restaurarVersao —
@@ -639,7 +639,7 @@ export const restaurarVersao = createServerFn({ method: "POST" })
  */
 /**
  * Reconstrói o documento único dos autos (repagina "Fls. N", reaplica formatação) a partir
- * do estado atual salvo na planilha — Prioridade 1.7/1.8 da evolução do sistema.
+ * do estado atual salvo no Supabase — Prioridade 1.7/1.8 da evolução do sistema.
  *
  * Antes, essa reconstrução rodava embutida (e duplicada 4x, com pequenas variações) dentro
  * de exportarParaDocs, sincronizarDocumentoJuntada, desfazerInsercao e restaurarVersao —
@@ -795,7 +795,7 @@ export const finalizarAutos = createServerFn({ method: "POST" })
 
 /**
  * Altera a situação de controle de uma peça já lançada nos autos (Prioridade 2.3) sem
- * precisar abrir o Google Docs — é só 1 gravação na planilha; o Google Docs em si nem é
+ * precisar abrir o Google Docs — é só 1 gravação no Supabase; o Google Docs em si nem é
  * tocado (o status é metadado do índice, não faz parte do conteúdo do documento).
  */
 export const atualizarStatusPeca = createServerFn({ method: "POST" })
@@ -816,7 +816,7 @@ export const atualizarStatusPeca = createServerFn({ method: "POST" })
 
 /**
  * Reordena as peças no índice dos autos (Prioridade 2.2 — arrastar/mover). Só grava a nova
- * ordem na planilha; NÃO repagina o Google Docs (a repaginação real acontece à parte, em
+ * ordem no Supabase; NÃO repagina o Google Docs (a repaginação real acontece à parte, em
  * sincronizarAutos, para não disparar uma reconstrução cara a cada arrasto).
  */
 export const reordenarPecas = createServerFn({ method: "POST" })
