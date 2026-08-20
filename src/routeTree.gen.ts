@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocumentosRouteImport } from './routes/documentos'
 import { Route as GraficosRouteImport } from './routes/graficos'
 import { Route as MapaRouteImport } from './routes/mapa'
+import { Route as MigrarSupabaseRouteImport } from './routes/migrar-supabase'
 import { Route as PecasRouteImport } from './routes/pecas'
 import { Route as RelatorioRouteImport } from './routes/relatorio'
 import { Route as SincronizacaoRouteImport } from './routes/sincronizacao'
@@ -37,6 +38,11 @@ const MapaRoute = MapaRouteImport.update({
   path: '/mapa',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MigrarSupabaseRoute = MigrarSupabaseRouteImport.update({
+  id: '/migrar-supabase',
+  path: '/migrar-supabase',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PecasRoute = PecasRouteImport.update({
   id: '/pecas',
   path: '/pecas',
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/documentos': typeof DocumentosRoute
   '/graficos': typeof GraficosRoute
   '/mapa': typeof MapaRoute
+  '/migrar-supabase': typeof MigrarSupabaseRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
   '/sincronizacao': typeof SincronizacaoRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/documentos': typeof DocumentosRoute
   '/graficos': typeof GraficosRoute
   '/mapa': typeof MapaRoute
+  '/migrar-supabase': typeof MigrarSupabaseRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
   '/sincronizacao': typeof SincronizacaoRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/documentos': typeof DocumentosRoute
   '/graficos': typeof GraficosRoute
   '/mapa': typeof MapaRoute
+  '/migrar-supabase': typeof MigrarSupabaseRoute
   '/pecas': typeof PecasRoute
   '/relatorio': typeof RelatorioRoute
   '/sincronizacao': typeof SincronizacaoRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/documentos'
     | '/graficos'
     | '/mapa'
+    | '/migrar-supabase'
     | '/pecas'
     | '/relatorio'
     | '/sincronizacao'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/documentos'
     | '/graficos'
     | '/mapa'
+    | '/migrar-supabase'
     | '/pecas'
     | '/relatorio'
     | '/sincronizacao'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/documentos'
     | '/graficos'
     | '/mapa'
+    | '/migrar-supabase'
     | '/pecas'
     | '/relatorio'
     | '/sincronizacao'
@@ -116,6 +128,7 @@ export interface RootRouteChildren {
   DocumentosRoute: typeof DocumentosRoute
   GraficosRoute: typeof GraficosRoute
   MapaRoute: typeof MapaRoute
+  MigrarSupabaseRoute: typeof MigrarSupabaseRoute
   PecasRoute: typeof PecasRoute
   RelatorioRoute: typeof RelatorioRoute
   SincronizacaoRoute: typeof SincronizacaoRoute
@@ -151,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MapaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/migrar-supabase': {
+      id: '/migrar-supabase'
+      path: '/migrar-supabase'
+      fullPath: '/migrar-supabase'
+      preLoaderRoute: typeof MigrarSupabaseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/pecas': {
       id: '/pecas'
       path: '/pecas'
@@ -180,6 +200,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocumentosRoute: DocumentosRoute,
   GraficosRoute: GraficosRoute,
   MapaRoute: MapaRoute,
+  MigrarSupabaseRoute: MigrarSupabaseRoute,
   PecasRoute: PecasRoute,
   RelatorioRoute: RelatorioRoute,
   SincronizacaoRoute: SincronizacaoRoute,
