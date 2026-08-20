@@ -74,9 +74,9 @@ export type StatusAlvo = {
 /** Uma linha do histórico recente — usada pelo painel de saúde da sincronização
  *  (Prioridade 9) e pelo painel de Diagnóstico (Prioridade 10) para "Última sincronização"
  *  e "Ver detalhes". Fica só em memória (não persiste no IndexedDB): é um resumo da sessão
- *  atual, não um log permanente entre sessões — não há banco de dados no servidor para
- *  guardar isso além da própria planilha, e gravar log ali destruiria o objetivo da
- *  Prioridade 1 de reduzir gravações. */
+ *  atual, não um log permanente entre sessões — o Supabase guarda sindicâncias/peças, mas
+ *  esse histórico de chamadas em si não é gravado lá, pra não virar mais escrita a cada
+ *  operação. */
 export type EntradaHistorico = {
   id: string;
   tipo: TipoOperacao;
