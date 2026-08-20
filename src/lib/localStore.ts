@@ -1,5 +1,3 @@
-
-Localstore · TS
 /**
  * Camada de armazenamento local (IndexedDB) — Prioridade 1.1/1.2 da evolução do sistema.
  *
