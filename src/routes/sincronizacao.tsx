@@ -94,8 +94,8 @@ function SaudeSincronizacao() {
       <header>
         <h1 className="font-serif text-2xl font-semibold">Saúde da Sincronização</h1>
         <p className="text-sm text-muted-foreground">
-          Integração com o Google Sheets, Docs e Drive — baseado na atividade real desta sessão, sem
-          gerar chamadas extras só para exibir o painel.
+          Integração com o Google Docs e Drive — baseado na atividade real desta sessão, sem gerar
+          chamadas extras só para exibir o painel.
         </p>
       </header>
 
@@ -112,7 +112,7 @@ function SaudeSincronizacao() {
                 {statusGeral === "sem-atividade" && "Sem atividade nesta sessão ainda"}
               </p>
               <p className="text-xs text-muted-foreground">
-                Sheets (planilha-base) · Docs (peças e autos) · Drive (pastas e anexos)
+                Supabase (banco de dados) · Docs (peças e autos) · Drive (pastas e anexos)
               </p>
             </div>
           </div>
@@ -283,9 +283,9 @@ function SaudeSincronizacao() {
           </ul>
         )}
         <p className="mt-2 text-[11px] text-muted-foreground">
-          Mostra só a sessão atual do navegador — não há um log permanente entre sessões, porque o
-          sistema não tem banco de dados além da própria planilha, e gravar log ali geraria mais
-          chamadas ao Google (o oposto do que a Prioridade 1 buscou resolver).
+          Mostra só a sessão atual do navegador — este histórico de chamadas ao Google não fica
+          gravado em lugar nenhum entre sessões (o que muda de verdade — sindicâncias, peças,
+          juntadas — vai pro Supabase).
         </p>
       </div>
     </div>
