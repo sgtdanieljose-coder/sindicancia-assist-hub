@@ -90,17 +90,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         name: "description",
         content:
-          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro digital, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
       },
       {
         property: "og:description",
         content:
-          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro digital, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
       },
       {
         name: "twitter:description",
         content:
-          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro digital, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
       },
       {
         property: "og:image",
