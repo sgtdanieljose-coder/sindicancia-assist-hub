@@ -49,8 +49,6 @@ import { STATUS_PECA, STATUS_PECA_LABEL, STATUS_JUNTADA_LABEL, type StatusPeca }
 import { useStatusSincronizacao, useSyncQueue, alvoAutos, alvoPeca } from "@/hooks/useSyncQueue";
 
 const PASTA_DRIVE = "https://drive.google.com/drive/folders/1zcQGM4T6-PAiEttCAdK6aqNBrUnQ-u6G";
-const PLANILHA =
-  "https://docs.google.com/spreadsheets/d/1Fy-JSNpRJXKE89Wm--zo0cFPJwU1Daf_ygUg78-s1jI/edit";
 
 export const Route = createFileRoute("/documentos")({
   validateSearch: (search: Record<string, unknown>): { visao?: "lista" | "mapa" } => ({
@@ -166,7 +164,7 @@ function Documentos() {
   }
 
   // ------------------------------------------------------------------------------------
-  // Prioridade 2.3 — alterar status sem abrir o Google Docs (é só 1 gravação na planilha).
+  // Prioridade 2.3 — alterar status sem abrir o Google Docs (é só 1 gravação no Supabase).
   // ------------------------------------------------------------------------------------
   const atualizarStatus = useMutation({
     mutationFn: (p: { documentId: string; status: StatusPeca }) =>
@@ -264,11 +262,6 @@ function Documentos() {
           <Button variant="outline" size="sm" asChild>
             <a href={selecionada?.anexosUrl || PASTA_DRIVE} target="_blank" rel="noreferrer">
               <FolderOpen className="size-4" /> Pasta de anexos
-            </a>
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <a href={PLANILHA} target="_blank" rel="noreferrer">
-              <ExternalLink className="size-4" /> Planilha-base
             </a>
           </Button>
         </div>
