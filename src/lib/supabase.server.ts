@@ -1,5 +1,3 @@
-
-Supabase.server · TS
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { DadoSindicado, Sindicancia } from "./pecas";
  
