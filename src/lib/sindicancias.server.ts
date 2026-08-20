@@ -1,16 +1,23 @@
-import type { VersaoPeca } from "./pecas";
-import { rowToSindicancia } from "./sindicancias.mapper";
+import type { Sindicancia, VersaoPeca } from "./pecas";
 
-/** Quantidade máxima de versões guardadas por peça (a planilha tem limite de caracteres por célula). */
+/** Quantidade máxima de versões guardadas por peça (herdado do limite de caracteres por
+ *  célula da antiga planilha — mantido para não deixar o histórico crescer sem limite). */
 const MAX_VERSOES = 15;
 
-/** Localiza a sindicância na planilha e devolve o registro e o número da linha. */
+/** Carrega a sindicância pelo id (Supabase). Etapa 2 da migração do banco: antes lia a
+ *  planilha inteira e achava a linha pelo id; agora é 1 select direto pela chave primária,
+ *  sem precisar devolver posição nenhuma (o antigo `linha`, usado só pra saber em qual linha
+ *  regravar depois — ver `salvar` abaixo, que resolve isso com upsert por id). */
 export async function carregar(sindicanciaId: string) {
-  const { readRows } = await import("./google.server");
-  const rows = await readRows();
-  const idx = rows.findIndex((r) => r[0] === sindicanciaId);
-  if (idx < 0) throw new Error("Sindicância não localizada na planilha.");
-  return { atual: rowToSindicancia(rows[idx]), linha: idx + 2 };
+  const { carregarSindicanciaDb } = await import("./supabase.server");
+  const atual = await carregarSindicanciaDb(sindicanciaId);
+  return { atual };
+}
+
+/** Grava a sindicância (Supabase, upsert por id) — substitui o antigo updateRow(linha, ...). */
+export async function salvar(atual: Sindicancia): Promise<Sindicancia> {
+  const { salvarSindicanciaDb } = await import("./supabase.server");
+  return salvarSindicanciaDb(atual);
 }
 
 /**
