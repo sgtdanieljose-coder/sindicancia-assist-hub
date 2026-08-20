@@ -948,7 +948,8 @@ export function textoEfetivoJuntada(s: Sindicancia, j: Juntada): string {
  * planilha, preenchida pelo servidor; ausente/undefined significa "ainda não salvo".
  */
 export type DadoSindicado = {
-  linha?: number;
+  /** Presente só em registros já salvos no Supabase (ausente = ainda não gravado). */
+  id?: string;
   sindicanciaId: string;
   /** Select inicial — dele depende quais campos abaixo fazem sentido mostrar. */
   civil: "Militar" | "Civil" | "";
