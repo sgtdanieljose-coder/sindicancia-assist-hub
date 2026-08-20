@@ -56,13 +56,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro digital, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
       },
       { property: "og:title", content: "Painel de Sindicâncias | Gestão do Encarregado — EB" },
       {
         property: "og:description",
         content:
-          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro na Planilha Google, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
+          "Painel de controle de sindicâncias do Exército Brasileiro: cadastro digital, cronômetro de prazo de 30 dias e checklist de etapas processuais.",
       },
     ],
   }),
@@ -94,8 +94,16 @@ const vazia: Sindicancia = {
 };
 
 function Dashboard() {
-  const { itens, erro, carregando, selecionada, setSelecionadaId, recarregar, usandoCache, cacheEm } =
-    useSindicancias();
+  const {
+    itens,
+    erro,
+    carregando,
+    selecionada,
+    setSelecionadaId,
+    recarregar,
+    usandoCache,
+    cacheEm,
+  } = useSindicancias();
 
   const [form, setForm] = useState<Sindicancia>(vazia);
   const [tagsAbertas, setTagsAbertas] = useState(false);
@@ -107,7 +115,7 @@ function Dashboard() {
   const salvar = useMutation({
     mutationFn: (s: Sindicancia) => salvarSindicancia({ data: s }),
     onSuccess: (s) => {
-      toast.success("Sindicância gravada na Planilha Google");
+      toast.success("Sindicância salva");
       setSelecionadaId(s.id);
       recarregar();
     },
@@ -150,7 +158,7 @@ function Dashboard() {
         <div className="min-w-0">
           <h1 className="truncate font-serif text-2xl font-semibold">Gestor do Processo</h1>
           <p className="text-sm text-muted-foreground">
-            Cadastro, prazos e etapas — dados persistidos na Planilha Google.
+            Cadastro, prazos e etapas — dados salvos automaticamente.
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -181,7 +189,6 @@ function Dashboard() {
           </span>
         </div>
       )}
-
 
       {itens.length > 0 && (
         <div className="painel space-y-3 p-4 sm:p-5">
@@ -310,9 +317,8 @@ function Dashboard() {
                   <Label>Seção dos Atos</Label>
                   <Input value={form.om} onChange={(e) => set("om", e.target.value)} />
                   <p className="text-xs text-muted-foreground">
-                    Local/seção onde são feitas as inquirições — preenche automaticamente o
-                    "local dos trabalhos" do Despacho Inicial e da Notificação Prévia no Gerador
-                    de Peças.
+                    Local/seção onde são feitas as inquirições — preenche automaticamente o "local
+                    dos trabalhos" do Despacho Inicial e da Notificação Prévia no Gerador de Peças.
                   </p>
                 </div>
 
@@ -421,7 +427,7 @@ function Dashboard() {
                 ) : (
                   <Save className="size-4" />
                 )}
-                Salvar na Planilha Google
+                Salvar sindicância
               </Button>
             </div>
 
@@ -491,7 +497,7 @@ function Dashboard() {
                   ))}
                 </ul>
                 <p className="text-xs text-muted-foreground">
-                  Marque as etapas e clique em salvar para registrar na planilha.
+                  Marque as etapas e clique em salvar para registrar as alterações.
                 </p>
               </div>
             </div>
