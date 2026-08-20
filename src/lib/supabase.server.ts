@@ -246,19 +246,3 @@ export async function removerSindicadoDb(id: string): Promise<void> {
   const { error } = await obterCliente().from("sindicados").delete().eq("id", id);
   if (error) throw new Error(`Supabase (remover sindicado): ${error.message}`);
 }
-
-/** Usado apenas pela migração única: zera as duas tabelas antes de reinserir. */
-export async function limparTudoDb(): Promise<void> {
-  const cliente = obterCliente();
-  const { error: erroSindicados } = await cliente
-    .from("sindicados")
-    .delete()
-    .not("id", "is", null);
-  if (erroSindicados) throw new Error(`Supabase (limpar sindicados): ${erroSindicados.message}`);
-  const { error: erroSindicancias } = await cliente
-    .from("sindicancias")
-    .delete()
-    .not("id", "is", null);
-  if (erroSindicancias)
-    throw new Error(`Supabase (limpar sindicâncias): ${erroSindicancias.message}`);
-}
