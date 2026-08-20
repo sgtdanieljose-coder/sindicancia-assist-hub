@@ -8,83 +8,30 @@ import {
   type StatusPeca,
   type StatusJuntada,
 } from "./pecas";
-import { rowToSindicancia, sindicanciaToRow } from "./sindicancias.mapper";
-import { carregar, novaVersao } from "./sindicancias.server";
+import { carregar, novaVersao, salvar } from "./sindicancias.server";
 
-function rowToDadoSindicado(row: string[], linha: number): DadoSindicado {
-  return {
-    linha,
-    sindicanciaId: row[0] ?? "",
-    civil: (row[1] as DadoSindicado["civil"]) || "",
-    idt: row[2] ?? "",
-    cpf: row[3] ?? "",
-    nascimento: row[4] ?? "",
-    naturalidade: row[5] ?? "",
-    estadoCivil: row[6] ?? "",
-    filiacao: row[7] ?? "",
-    mae: row[8] ?? "",
-    enderecoCompleto: row[9] ?? "",
-    // row[10] era "cep" — não é mais coletado (o CEP agora vai dentro de enderecoCompleto).
-    companhia: row[11] ?? "",
-    vocativo: row[12] ?? "",
-  };
-}
-
-function dadoSindicadoToRow(d: DadoSindicado): string[] {
-  return [
-    d.sindicanciaId,
-    d.civil,
-    d.idt,
-    d.cpf,
-    d.nascimento,
-    d.naturalidade,
-    d.estadoCivil,
-    d.filiacao,
-    d.mae,
-    d.enderecoCompleto,
-    "", // coluna "cep" mantida em branco só para não deslocar companhia/vocativo
-    d.companhia,
-    d.vocativo,
-  ];
-}
-
-/** Lista os sindicados (Dados_Sindicado) vinculados a uma sindicância pelo id. */
+/** Lista os sindicados vinculados a uma sindicância pelo id (Supabase). */
 export const listarSindicados = createServerFn({ method: "GET" })
   .inputValidator((data: { sindicanciaId: string }) => data)
   .handler(async ({ data }) => {
-    const { readSindicadosRows } = await import("./google.server");
-    const rows = await readSindicadosRows();
-    return rows
-      .map((row, i) => ({ row, linha: i + 2 }))
-      .filter(({ row }) => row[0] === data.sindicanciaId)
-      .map(({ row, linha }) => rowToDadoSindicado(row, linha));
+    const { listarSindicadosDb } = await import("./supabase.server");
+    return listarSindicadosDb(data.sindicanciaId);
   });
 
-/** Cria (sem `linha`) ou atualiza (com `linha`) um registro de Dados_Sindicado. */
+/** Cria (sem `id`) ou atualiza (com `id`) um sindicado. */
 export const salvarSindicado = createServerFn({ method: "POST" })
-  .inputValidator((data: DadoSindicado) => data)
+  .inputValidator((data: DadoSindicado & { id?: string }) => data)
   .handler(async ({ data }) => {
-    const { appendSindicadoRow, updateSindicadoRow, readSindicadosRows } =
-      await import("./google.server");
-    const row = dadoSindicadoToRow(data);
-
-    if (data.linha) {
-      await updateSindicadoRow(data.linha, row);
-      return { ...data };
-    }
-
-    await appendSindicadoRow(row);
-    const rows = await readSindicadosRows();
-    const idx = rows.map((r) => r[0]).lastIndexOf(data.sindicanciaId);
-    return { ...data, linha: idx >= 0 ? idx + 2 : undefined };
+    const { salvarSindicadoDb } = await import("./supabase.server");
+    return salvarSindicadoDb(data);
   });
 
-/** Remove (limpa) um registro de Dados_Sindicado pela posição na planilha. */
+/** Remove um sindicado pelo id. */
 export const removerSindicado = createServerFn({ method: "POST" })
-  .inputValidator((data: { linha: number }) => data)
+  .inputValidator((data: { id: string }) => data)
   .handler(async ({ data }) => {
-    const { limparSindicadoRow } = await import("./google.server");
-    await limparSindicadoRow(data.linha);
+    const { removerSindicadoDb } = await import("./supabase.server");
+    await removerSindicadoDb(data.id);
   });
 
 /**
@@ -186,10 +133,10 @@ async function sincronizarDocumentoJuntada(
 }
 
 export const listarSindicancias = createServerFn({ method: "GET" }).handler(async () => {
-  const { readRows } = await import("./google.server");
+  const { listarSindicanciasDb } = await import("./supabase.server");
   try {
-    const rows = await readRows();
-    return { itens: rows.map(rowToSindicancia), erro: null as string | null };
+    const itens = await listarSindicanciasDb();
+    return { itens, erro: null as string | null };
   } catch (e) {
     return { itens: [] as Sindicancia[], erro: (e as Error).message };
   }
@@ -198,11 +145,9 @@ export const listarSindicancias = createServerFn({ method: "GET" }).handler(asyn
 export const salvarSindicancia = createServerFn({ method: "POST" })
   .inputValidator((data: Sindicancia) => data)
   .handler(async ({ data }) => {
-    const { readRows, appendRow, updateRow, ensureSindicanciaFolders } =
-      await import("./google.server");
+    const { ensureSindicanciaFolders } = await import("./google.server");
+    const { salvarSindicanciaDb } = await import("./supabase.server");
     const registro: Sindicancia = { ...data, id: data.id || `SIND-${Date.now()}` };
-    const rows = await readRows();
-    const idx = rows.findIndex((r) => r[0] === registro.id);
 
     // Cria a pasta da sindicância (nome = NUP) com a subpasta "Anexos" no Drive.
     if (registro.nup?.trim() && !registro.pastaId) {
@@ -217,13 +162,9 @@ export const salvarSindicancia = createServerFn({ method: "POST" })
       }
     }
 
-    const row = sindicanciaToRow(registro);
-    if (idx >= 0) {
-      await updateRow(idx + 2, row);
-    } else {
-      await appendRow(row);
-    }
-    return rowToSindicancia(row);
+    // salvarSindicanciaDb já faz upsert por id — não precisa mais ler tudo antes pra
+    // decidir entre criar/atualizar, nem achar posição nenhuma.
+    return salvarSindicanciaDb(registro);
   });
 
 /**
@@ -247,7 +188,6 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     const {
       createDoc,
       updateDocContent,
-      updateRow,
       ensureAutosDoc,
       ensureSindicanciaFolders,
       arquivoAtivo,
@@ -261,7 +201,7 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     const inicio = Date.now();
     const rastreador = criarRastreador();
 
-    const { atual, linha } = await rastreador.medir("carregar sindicância", () =>
+    const { atual } = await rastreador.medir("carregar sindicância", () =>
       carregar(data.sindicanciaId),
     );
 
@@ -396,11 +336,9 @@ export const exportarParaDocs = createServerFn({ method: "POST" })
     }
 
     try {
-      await rastreador.medir("gravar linha na planilha", () =>
-        updateRow(linha, sindicanciaToRow(atual)),
-      );
+      await rastreador.medir("gravar sindicância", () => salvar(atual));
     } catch (e) {
-      console.warn("Falha ao registrar documento na planilha:", e);
+      console.warn("Falha ao registrar documento na sindicância:", e);
     }
 
     return {
@@ -426,8 +364,7 @@ export const criarJuntada = createServerFn({ method: "POST" })
     (data: { sindicanciaId: string; titulo: string; data: string; responsavel?: string }) => data,
   )
   .handler(async ({ data }) => {
-    const { updateRow } = await import("./google.server");
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    const { atual: atualInicial } = await carregar(data.sindicanciaId);
     let atual = atualInicial;
     const numero = (atual.juntadas?.length ?? 0) + 1;
     const juntada: Juntada = {
@@ -444,7 +381,7 @@ export const criarJuntada = createServerFn({ method: "POST" })
 
     atual = await sincronizarDocumentoJuntada(atual, juntada.id);
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await salvar(atual);
     return atual.juntadas.find((j) => j.id === juntada.id)!;
   });
 
@@ -467,8 +404,7 @@ export const salvarJuntada = createServerFn({ method: "POST" })
     }) => data,
   )
   .handler(async ({ data }) => {
-    const { updateRow } = await import("./google.server");
-    const { atual: atualInicial, linha } = await carregar(data.sindicanciaId);
+    const { atual: atualInicial } = await carregar(data.sindicanciaId);
     let atual = atualInicial;
 
     atual.juntadas = (atual.juntadas ?? []).map((j) =>
@@ -485,7 +421,7 @@ export const salvarJuntada = createServerFn({ method: "POST" })
 
     atual = await sincronizarDocumentoJuntada(atual, data.juntadaId);
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await salvar(atual);
     return atual.juntadas.find((j) => j.id === data.juntadaId)!;
   });
 
@@ -514,9 +450,8 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
     const mimeType = arquivo.type || "application/octet-stream";
     const bytes = new Uint8Array(await arquivo.arrayBuffer());
 
-    const { uploadAnexo, updateRow, ensureSindicanciaFolders, arquivoAtivo } =
-      await import("./google.server");
-    const { atual: atualInicial, linha } = await carregar(sindicanciaId);
+    const { uploadAnexo, ensureSindicanciaFolders, arquivoAtivo } = await import("./google.server");
+    const { atual: atualInicial } = await carregar(sindicanciaId);
     let atual = atualInicial;
 
     let anexosId = atual.anexosId;
@@ -563,7 +498,7 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
 
     atual = await sincronizarDocumentoJuntada(atual, juntadaId);
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await salvar(atual);
     return enviado;
   });
 
@@ -575,9 +510,9 @@ export const adicionarAnexo = createServerFn({ method: "POST" })
 export const desfazerInsercao = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string; documentId: string; etapa?: string }) => data)
   .handler(async ({ data }) => {
-    const { updateRow, ensureAutosDoc, moverParaLixeira } = await import("./google.server");
+    const { ensureAutosDoc, moverParaLixeira } = await import("./google.server");
 
-    const { atual, linha } = await carregar(data.sindicanciaId);
+    const { atual } = await carregar(data.sindicanciaId);
     const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
     if (!alvo) throw new Error("A peça já não consta mais nos autos.");
 
@@ -606,7 +541,7 @@ export const desfazerInsercao = createServerFn({ method: "POST" })
       console.warn("Falha ao garantir o documento único dos autos:", e);
     }
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await salvar(atual);
     return { removido: alvo.titulo, total: atual.documentos.length };
   });
 
@@ -629,10 +564,10 @@ export const restaurarVersao = createServerFn({ method: "POST" })
       data,
   )
   .handler(async ({ data }) => {
-    const { updateDocContent, updateRow, ensureAutosDoc, getDocText, formatarPecaBasica } =
+    const { updateDocContent, ensureAutosDoc, getDocText, formatarPecaBasica } =
       await import("./google.server");
 
-    const { atual, linha } = await carregar(data.sindicanciaId);
+    const { atual } = await carregar(data.sindicanciaId);
     const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
     if (!alvo) throw new Error("Peça não localizada nos autos.");
     const versao = (alvo.versoes ?? []).find((v) => v.id === data.versaoId);
@@ -680,9 +615,9 @@ export const restaurarVersao = createServerFn({ method: "POST" })
     }
 
     try {
-      await updateRow(linha, sindicanciaToRow(atual));
+      await salvar(atual);
     } catch (e) {
-      console.warn("Falha ao registrar a restauração na planilha:", e);
+      console.warn("Falha ao registrar a restauração na sindicância:", e);
     }
 
     return { texto: versao.texto, avisoFormatacao };
@@ -763,21 +698,19 @@ async function reconstruirAutosDeTrabalho(
 export const sincronizarAutos = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string }) => data)
   .handler(async ({ data }) => {
-    const { updateRow, resetarContadorRequisicoes, obterContadorRequisicoes } =
+    const { resetarContadorRequisicoes, obterContadorRequisicoes } =
       await import("./google.server");
     const { criarRastreador } = await import("./rastreamento");
     resetarContadorRequisicoes();
     const inicio = Date.now();
     const rastreador = criarRastreador();
 
-    const { atual: atualInicial, linha } = await rastreador.medir("carregar sindicância", () =>
+    const { atual: atualInicial } = await rastreador.medir("carregar sindicância", () =>
       carregar(data.sindicanciaId),
     );
     const atual = await reconstruirAutosDeTrabalho(atualInicial, rastreador);
 
-    await rastreador.medir("gravar linha na planilha", () =>
-      updateRow(linha, sindicanciaToRow(atual)),
-    );
+    await rastreador.medir("gravar sindicância", () => salvar(atual));
 
     return {
       autosUrl: atual.autosUrl,
@@ -806,7 +739,7 @@ export const sincronizarAutos = createServerFn({ method: "POST" })
 export const finalizarAutos = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string; forcarComPendencias?: boolean }) => data)
   .handler(async ({ data }) => {
-    const { copiarArquivoDrive, updateRow, resetarContadorRequisicoes, obterContadorRequisicoes } =
+    const { copiarArquivoDrive, resetarContadorRequisicoes, obterContadorRequisicoes } =
       await import("./google.server");
     const { validarAutos } = await import("./validacao");
     const { criarRastreador } = await import("./rastreamento");
@@ -814,7 +747,7 @@ export const finalizarAutos = createServerFn({ method: "POST" })
     const inicio = Date.now();
     const rastreador = criarRastreador();
 
-    const { atual: atualInicial, linha } = await rastreador.medir("carregar sindicância", () =>
+    const { atual: atualInicial } = await rastreador.medir("carregar sindicância", () =>
       carregar(data.sindicanciaId),
     );
     const atual = await reconstruirAutosDeTrabalho(atualInicial, rastreador);
@@ -848,9 +781,7 @@ export const finalizarAutos = createServerFn({ method: "POST" })
     };
     atual.autosFinais = [...(atual.autosFinais ?? []), registro];
 
-    await rastreador.medir("gravar linha na planilha", () =>
-      updateRow(linha, sindicanciaToRow(atual)),
-    );
+    await rastreador.medir("gravar sindicância", () => salvar(atual));
 
     return {
       ...registro,
@@ -870,8 +801,7 @@ export const finalizarAutos = createServerFn({ method: "POST" })
 export const atualizarStatusPeca = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string; documentId: string; status: StatusPeca }) => data)
   .handler(async ({ data }) => {
-    const { updateRow } = await import("./google.server");
-    const { atual, linha } = await carregar(data.sindicanciaId);
+    const { atual } = await carregar(data.sindicanciaId);
 
     const alvo = atual.documentos.find((d) => d.documentId === data.documentId);
     if (!alvo) throw new Error("Peça não encontrada nos autos.");
@@ -880,7 +810,7 @@ export const atualizarStatusPeca = createServerFn({ method: "POST" })
       d.documentId === data.documentId ? { ...d, status: data.status } : d,
     );
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await salvar(atual);
     return { documentId: data.documentId, status: data.status };
   });
 
@@ -892,8 +822,7 @@ export const atualizarStatusPeca = createServerFn({ method: "POST" })
 export const reordenarPecas = createServerFn({ method: "POST" })
   .inputValidator((data: { sindicanciaId: string; ordem: string[] }) => data)
   .handler(async ({ data }) => {
-    const { updateRow } = await import("./google.server");
-    const { atual, linha } = await carregar(data.sindicanciaId);
+    const { atual } = await carregar(data.sindicanciaId);
 
     const porId = new Map(atual.documentos.map((d) => [d.documentId, d]));
     const reordenados = data.ordem
@@ -904,6 +833,6 @@ export const reordenarPecas = createServerFn({ method: "POST" })
     const faltantes = atual.documentos.filter((d) => !data.ordem.includes(d.documentId));
     atual.documentos = [...reordenados, ...faltantes];
 
-    await updateRow(linha, sindicanciaToRow(atual));
+    await salvar(atual);
     return { total: atual.documentos.length };
   });
