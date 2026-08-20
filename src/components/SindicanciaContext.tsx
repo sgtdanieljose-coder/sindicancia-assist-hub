@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { listarSindicancias } from "@/lib/sindicancias.functions";
 import { lerCacheSindicancias, salvarCacheSindicancias } from "@/lib/localStore";
@@ -19,9 +12,9 @@ type Ctx = {
   setSelecionadaId: (id: string | null) => void;
   selecionada: Sindicancia | null;
   recarregar: () => void;
-  /** Verdadeiro quando os dados exibidos vêm do cache local (Google indisponível). */
+  /** Verdadeiro quando os dados exibidos vêm do cache local (servidor indisponível). */
   usandoCache: boolean;
-  /** Momento da última leitura bem-sucedida da planilha, se houver cache. */
+  /** Momento da última leitura bem-sucedida das sindicâncias, se houver cache. */
   cacheEm: string | null;
 };
 
@@ -36,7 +29,7 @@ export function SindicanciaProvider({ children }: { children: ReactNode }) {
     queryFn: () => listarSindicancias(),
   });
 
-  // Hidrata o cache local uma vez no navegador — assim, se o Google estiver fora do ar, o
+  // Hidrata o cache local uma vez no navegador — assim, se o servidor estiver fora do ar, o
   // dashboard já tem o que mostrar antes mesmo da primeira falha.
   useEffect(() => {
     void lerCacheSindicancias<Sindicancia>().then((c) => {
@@ -59,9 +52,13 @@ export function SindicanciaProvider({ children }: { children: ReactNode }) {
 
   const erroBruto =
     data?.erro ??
-    (isError ? (error instanceof Error ? error.message : "Falha ao ler a planilha.") : null);
+    (isError
+      ? error instanceof Error
+        ? error.message
+        : "Falha ao carregar as sindicâncias."
+      : null);
   const erro = usandoCache
-    ? `Google indisponível no momento — exibindo a última cópia local dos dados. (${erroBruto})`
+    ? `Servidor indisponível no momento — exibindo a última cópia local dos dados. (${erroBruto})`
     : erroBruto;
 
   const selecionada = useMemo(
