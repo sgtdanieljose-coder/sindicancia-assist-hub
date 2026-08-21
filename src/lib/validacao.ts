@@ -115,3 +115,84 @@ export function validarAutos(s: Sindicancia): ItemValidacao[] {
 
   return itens;
 }
+
+// ====================================================================================
+// Validação de cadastro — roda ANTES de salvar a sindicância (Dados Gerais), distinta de
+// validarAutos acima (que roda antes de finalizar os autos já em andamento). Os itens cujo
+// título está em CAMPOS_BLOQUEANTES impedem o salvamento (ver index.tsx); os demais (hoje,
+// só a duplicidade de NUP) são só um alerta — a pasta do Drive é reaproveitada pelo nome, e
+// duas sindicâncias com o mesmo NUP pode ser legítimo (reabertura, por exemplo), então não
+// vale a pena travar o salvamento por causa disso.
+// ====================================================================================
+
+/** Formato bem permissivo de propósito: dígitos, opcionalmente pontuados, barra, ano de 4
+ *  dígitos e sufixo de 2 dígitos (ex.: "64070.004012/2025-29" ou "77070008931/2026-48" — os
+ *  dois formatos já aparecem em dados reais, então a checagem não força um único padrão). */
+const NUP_FORMATO = /^\d{4,}[.\d]*\/\d{4}-\d{2}$/;
+
+export const CAMPOS_BLOQUEANTES = [
+  "NUP preenchido",
+  "Formato do NUP",
+  "Seção dos Atos preenchida",
+  "OM instauradora preenchida",
+  "Portaria preenchida",
+  "Data da portaria válida",
+] as const;
+
+/**
+ * Confere os campos do cadastro (NUP/NuD, OM, datas, prazo) antes de salvar. `outras` é a
+ * lista das demais sindicâncias já carregadas (para checar duplicidade de NUP) — passe a
+ * lista completa do dashboard; a própria sindicância em edição é excluída pela comparação
+ * de id. Função pura, sem chamada nenhuma ao Google/Supabase.
+ */
+export function validarCadastro(s: Sindicancia, outras: Sindicancia[]): ItemValidacao[] {
+  const itens: ItemValidacao[] = [];
+  const nup = s.nup?.trim() ?? "";
+
+  itens.push({ titulo: "NUP preenchido", ok: Boolean(nup) });
+  if (nup) {
+    itens.push({
+      titulo: "Formato do NUP",
+      ok: NUP_FORMATO.test(nup),
+      detalhe: NUP_FORMATO.test(nup)
+        ? undefined
+        : "esperado algo como 64070.004012/2025-29 ou 77070008931/2026-48",
+    });
+    const duplicado = outras.some(
+      (i) => i.id !== s.id && i.nup.trim().toLowerCase() === nup.toLowerCase(),
+    );
+    itens.push({
+      titulo: "NUP não duplicado",
+      ok: !duplicado,
+      detalhe: duplicado
+        ? "já existe outra sindicância com este NUP — confira se não é duplicidade"
+        : undefined,
+    });
+  }
+
+  itens.push({ titulo: "Seção dos Atos preenchida", ok: Boolean(s.om?.trim()) });
+  itens.push({ titulo: "OM instauradora preenchida", ok: Boolean(s.omInstauradora?.trim()) });
+  itens.push({
+    titulo: "Portaria preenchida",
+    ok: Boolean(s.portariaNumero?.trim() && s.portariaData?.trim()),
+    detalhe:
+      s.portariaNumero?.trim() && s.portariaData?.trim()
+        ? undefined
+        : "número e data da portaria são obrigatórios",
+  });
+  if (s.portariaData?.trim()) {
+    const dataValida = !Number.isNaN(new Date(s.portariaData).getTime());
+    itens.push({
+      titulo: "Data da portaria válida",
+      ok: dataValida,
+      detalhe: dataValida ? undefined : "data em formato inválido",
+    });
+  }
+  itens.push({
+    titulo: "Prazo de prorrogação válido",
+    ok: (s.prazoProrrogadoDias ?? 0) >= 0,
+    detalhe: (s.prazoProrrogadoDias ?? 0) >= 0 ? undefined : "não pode ser negativo",
+  });
+
+  return itens;
+}
