@@ -1,3 +1,5 @@
+import { TITULOS_PECA, ROTULOS_NEGRITO } from "./pecas";
+
 const GATEWAY = "https://connector-gateway.lovable.dev";
 
 type Connector = "google_sheets" | "google_docs" | "google_drive";
@@ -594,46 +596,10 @@ async function listarParagrafos(documentId: string): Promise<Paragrafo[]> {
 // partir daí, tanto no documento individual quanto no consolidado.
 // ====================================================================================
 
-/** Título literal (linha exata no corpo do texto) de cada peça que já segue a convenção acima. */
-const TITULOS_PECA: Partial<Record<string, string>> = {
-  autos: "AUTOS DE SINDICÂNCIA",
-  "despacho-inicial": "DESPACHO",
-  "despacho-diversos": "DESPACHO",
-  abertura: "TERMO DE ABERTURA",
-  notificacao: "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
-  inquiricao: "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
-  depoimento: "TERMO DE DECLARAÇÕES DO SINDICADO",
-  diex: "DIEX",
-  acareacao: "TERMO DE ACAREAÇÃO",
-  oficio: "OFÍCIO",
-  certidao: "CERTIDÃO",
-  encerramento: "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
-  alegacoes: "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
-  prorrogacao: "PEDIDO DE PRORROGAÇÃO DE PRAZO",
-  relatorio: "RELATÓRIO DO SINDICANTE",
-};
+/** Reaproveitado de pecas.ts — ver comentário lá (única fonte, também usada na
+ *  pré-visualização no navegador). */
 
-/**
- * Rótulos que a EB10-IG-01.001 manda destacar em negrito:
- *  - "NUP:", "SINDICANTE:", "SINDICADO:", "OBJETO:" — convenção própria da capa dos
- *    autos deste sistema, no mesmo espírito do art. 33 (epígrafe/ementa);
- *  - "Assunto:", "Referência(s):", "Anexo(s):" — art. 33, IV, e Anexo I.1 (item 2,
- *    alínea "e") e Anexo II.2 (DIEx): assunto, referência e anexo vêm sempre em
- *    negrito nos ofícios e documentos internos.
- * Aplica-se em QUALQUER peça (não só na capa), mantendo o valor após os dois-pontos
- * com peso normal.
- */
-const ROTULOS_NEGRITO = [
-  "NUP:",
-  "SINDICANTE:",
-  "SINDICADO:",
-  "OBJETO:",
-  "Assunto:",
-  "Referência:",
-  "Referências:",
-  "Anexo:",
-  "Anexos:",
-];
+/** Reaproveitado de pecas.ts — ver comentário lá. */
 
 /** Cabeçalho (tudo antes do título) em negrito+centralizado; título em negrito+sublinhado+
  *  centralizado. Não faz nada se o título não for encontrado (evita negritar o documento
