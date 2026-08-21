@@ -11,19 +11,19 @@
  * Só existe no navegador — TanStack Start também executa este módulo durante o SSR, então
  * toda função aqui vira no-op (ou resolve undefined/[]) quando `indexedDB` não existe.
  */
- 
+
 const DB_NOME = "sindicancia-local";
 const DB_VERSAO = 2;
 const STORE_RASCUNHOS = "rascunhos";
 const STORE_FILA = "fila-sync";
 const STORE_CACHE = "cache";
- 
+
 function suportado(): boolean {
   return typeof indexedDB !== "undefined";
 }
- 
+
 let dbPromise: Promise<IDBDatabase> | null = null;
- 
+
 function abrirDb(): Promise<IDBDatabase> {
   if (!suportado()) return Promise.reject(new Error("IndexedDB indisponível (SSR)."));
   if (dbPromise) return dbPromise;
@@ -46,7 +46,7 @@ function abrirDb(): Promise<IDBDatabase> {
   });
   return dbPromise;
 }
- 
+
 function comStore<T>(
   nome: string,
   modo: IDBTransactionMode,
@@ -63,11 +63,11 @@ function comStore<T>(
       }),
   );
 }
- 
+
 // ==================================================================================
 // Rascunhos de peça
 // ==================================================================================
- 
+
 export type RascunhoPeca = {
   /** `${sindicanciaId}:${pecaId}` — ver chaveRascunho. */
   chave: string;
@@ -77,11 +77,11 @@ export type RascunhoPeca = {
   campos?: Record<string, string>;
   atualizadoEm: string;
 };
- 
+
 export function chaveRascunho(sindicanciaId: string, pecaId: string): string {
   return `${sindicanciaId}:${pecaId}`;
 }
- 
+
 /** Salva o rascunho local — best-effort: se o navegador não suportar/negar IndexedDB, só
  *  avisa no console (o usuário ainda consegue trabalhar, só perde o autosave local). */
 export async function salvarRascunho(r: RascunhoPeca): Promise<void> {
@@ -92,7 +92,7 @@ export async function salvarRascunho(r: RascunhoPeca): Promise<void> {
     console.warn("Não foi possível salvar o rascunho localmente:", e);
   }
 }
- 
+
 export async function lerRascunho(chave: string): Promise<RascunhoPeca | undefined> {
   if (!suportado()) return undefined;
   try {
@@ -103,7 +103,7 @@ export async function lerRascunho(chave: string): Promise<RascunhoPeca | undefin
     return undefined;
   }
 }
- 
+
 export async function apagarRascunho(chave: string): Promise<void> {
   if (!suportado()) return;
   try {
@@ -112,11 +112,11 @@ export async function apagarRascunho(chave: string): Promise<void> {
     // Ignora — o rascunho fica órfão no IndexedDB, sem impacto funcional.
   }
 }
- 
+
 // ==================================================================================
 // Fila de sincronização persistida (ver syncQueue.ts, que é quem decide O QUÊ salvar aqui)
 // ==================================================================================
- 
+
 export async function listarOperacoesPersistidas<T>(): Promise<T[]> {
   if (!suportado()) return [];
   try {
@@ -125,7 +125,7 @@ export async function listarOperacoesPersistidas<T>(): Promise<T[]> {
     return [];
   }
 }
- 
+
 export async function salvarOperacaoPersistida(op: { id: string }): Promise<void> {
   if (!suportado()) return;
   try {
@@ -134,7 +134,7 @@ export async function salvarOperacaoPersistida(op: { id: string }): Promise<void
     console.warn("Não foi possível persistir a operação de sincronização:", e);
   }
 }
- 
+
 export async function apagarOperacaoPersistida(id: string): Promise<void> {
   if (!suportado()) return;
   try {
@@ -144,21 +144,21 @@ export async function apagarOperacaoPersistida(id: string): Promise<void> {
     // reprocessada (idempotente) na próxima hidratação; não trava o app.
   }
 }
- 
+
 // ==================================================================================
 // Cache local das sindicâncias (Supabase)
 // ==================================================================================
- 
+
 /** Última leitura bem-sucedida das sindicâncias, guardada para o dashboard continuar
- *  funcionando (em modo somente-leitura) quando o Google estiver indisponível. */
+ *  funcionando (em modo somente-leitura) quando o Supabase estiver indisponível. */
 export type CacheSindicancias<T> = {
   chave: string;
   itens: T[];
   atualizadoEm: string;
 };
- 
+
 const CHAVE_CACHE_SINDICANCIAS = "sindicancias";
- 
+
 export async function salvarCacheSindicancias<T>(itens: T[]): Promise<void> {
   if (!suportado()) return;
   try {
@@ -173,7 +173,7 @@ export async function salvarCacheSindicancias<T>(itens: T[]): Promise<void> {
     console.warn("Não foi possível guardar o cache local das sindicâncias:", e);
   }
 }
- 
+
 export async function lerCacheSindicancias<T>(): Promise<CacheSindicancias<T> | undefined> {
   if (!suportado()) return undefined;
   try {
@@ -184,5 +184,3 @@ export async function lerCacheSindicancias<T>(): Promise<CacheSindicancias<T> | 
     return undefined;
   }
 }
- 
-
