@@ -177,7 +177,7 @@ export type Sindicancia = {
 };
 
 export const PRAZO_BASE_DIAS = 30;
-export const PRAZO_ALERTA_ANTECEDENCIA_DIAS = 10;
+export const PRAZO_ALERTA_ANTECEDENCIA_DIAS = 20;
 
 /** Prazo total (dias corridos), somando eventual prorrogação já registrada. */
 export function prazoTotalDias(s: Pick<Sindicancia, "prazoProrrogadoDias">): number {
@@ -340,6 +340,42 @@ export const PECAS = [
 ] as const;
 
 export type PecaId = (typeof PECAS)[number]["id"];
+
+/** Título literal (linha exata no corpo do texto) de cada peça que já segue a convenção de
+ *  formatação da EB10-IG-01.001 — usado tanto na formatação real do Google Docs
+ *  (google.server.ts) quanto na pré-visualização no navegador (PreviewPeca.tsx), pra não
+ *  ter duas fontes divergentes do mesmo mapeamento. */
+export const TITULOS_PECA: Partial<Record<string, string>> = {
+  autos: "AUTOS DE SINDICÂNCIA",
+  "despacho-inicial": "DESPACHO",
+  "despacho-diversos": "DESPACHO",
+  abertura: "TERMO DE ABERTURA",
+  notificacao: "NOTIFICAÇÃO PRÉVIA DO SINDICADO",
+  inquiricao: "TERMO DE INQUIRIÇÃO DE TESTEMUNHA",
+  depoimento: "TERMO DE DECLARAÇÕES DO SINDICADO",
+  diex: "DIEX",
+  acareacao: "TERMO DE ACAREAÇÃO",
+  oficio: "OFÍCIO",
+  certidao: "CERTIDÃO",
+  encerramento: "TERMO DE ENCERRAMENTO DA INSTRUÇÃO",
+  alegacoes: "NOTIFICAÇÃO PARA APRESENTAÇÃO DE ALEGAÇÕES FINAIS",
+  prorrogacao: "PEDIDO DE PRORROGAÇÃO DE PRAZO",
+  relatorio: "RELATÓRIO DO SINDICANTE",
+};
+
+/** Rótulos que a EB10-IG-01.001 manda destacar em negrito (art. 33 e Anexos I/II) — mesma
+ *  observação de TITULOS_PECA acima: única fonte, usada no Docs real e na pré-visualização. */
+export const ROTULOS_NEGRITO = [
+  "NUP:",
+  "SINDICANTE:",
+  "SINDICADO:",
+  "OBJETO:",
+  "Assunto:",
+  "Referência:",
+  "Referências:",
+  "Anexo:",
+  "Anexos:",
+];
 
 /**
  * Opções de rodapé para o DIEx (Anexo II.2 da EB10-IG-01.001): tanto o modelo de
@@ -940,6 +976,66 @@ export function gerarTextoJuntada(s: Sindicancia, j: Juntada): string {
  */
 export function textoEfetivoJuntada(s: Sindicancia, j: Juntada): string {
   return j.textoEditado && j.textoEditado.trim() ? j.textoEditado : gerarTextoJuntada(s, j);
+}
+
+// ====================================================================================
+// Pré-visualização formatada (client-side) — Feature de pré-visualização das peças. Espelha
+// a MESMA lógica de requestsCabecalhoTitulo/requestsCorpoJustificado/requestsRotulosNegrito/
+// requestsAssinatura de google.server.ts (que só roda no servidor, contra a API do Google
+// Docs), mas operando em texto puro — cada linha não vazia vira um "parágrafo", do mesmo
+// jeito que cada linha inserida vira um parágrafo no Doc real. Não chama nenhuma API; serve
+// só para o usuário ter uma ideia de como a peça vai ficar formatada antes de exportar.
+// ====================================================================================
+
+export type BlocoPreview = {
+  texto: string;
+  negrito?: boolean;
+  sublinhado?: boolean;
+  centralizado?: boolean;
+  justificado?: boolean;
+  /** Recuo de primeira linha (art. 27) — aproximado no preview como recuo do parágrafo
+   *  inteiro, já que o preview não reproduz layout de linha por linha do Docs. */
+  recuo?: boolean;
+  /** Prefixo (ex.: "NUP:") que deve ficar em negrito dentro do bloco; o resto do texto segue
+   *  peso normal. Só é relevante quando `negrito` acima é falso (senão a linha inteira já
+   *  está em negrito). */
+  rotulo?: string;
+};
+
+export function formatarBlocosPreview(texto: string, pecaId?: PecaId): BlocoPreview[] {
+  const paragrafos = texto
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // Mesma regra do Docs real: sem pecaId reconhecido, gruposFormatacaoPeca não aplica
+  // formatação nenhuma (nem rótulos, nem assinatura) — só o texto puro.
+  if (!pecaId) return paragrafos.map((p) => ({ texto: p }));
+
+  const tituloAlvo = TITULOS_PECA[pecaId];
+  const idxTitulo = tituloAlvo ? paragrafos.findIndex((p) => p === tituloAlvo) : -1;
+  const tituloEncontrado = idxTitulo >= 0;
+  const ehAutos = pecaId === "autos";
+  const temAssinatura = !ehAutos && paragrafos.length >= 2;
+
+  return paragrafos.map((p, i) => {
+    const rotulo = ROTULOS_NEGRITO.find((r) => p.startsWith(r));
+    const noCabecalho = tituloEncontrado && i < idxTitulo;
+    const ehTitulo = tituloEncontrado && i === idxTitulo;
+    const noCorpo = tituloEncontrado && !ehAutos && i > idxTitulo && i < paragrafos.length - 2;
+    const naAssinatura = temAssinatura && i >= paragrafos.length - 2;
+    const ehNomeAssinatura = naAssinatura && i === paragrafos.length - 2;
+
+    return {
+      texto: p,
+      negrito: noCabecalho || ehTitulo || ehNomeAssinatura,
+      sublinhado: ehTitulo,
+      centralizado: noCabecalho || ehTitulo || naAssinatura,
+      justificado: noCorpo,
+      recuo: noCorpo,
+      rotulo,
+    };
+  });
 }
 
 /**
