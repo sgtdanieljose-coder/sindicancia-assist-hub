@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -28,7 +28,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useSindicancias } from "@/components/SindicanciaContext";
+import { ListaItensValidacao } from "@/components/PainelValidacao";
 import { cn } from "@/lib/utils";
 import {
   listarSindicados,
@@ -36,6 +45,7 @@ import {
   salvarSindicado,
   salvarSindicancia,
 } from "@/lib/sindicancias.functions";
+import { CAMPOS_BLOQUEANTES, validarCadastro } from "@/lib/validacao";
 import {
   ESTADO_CIVIL_OPCOES,
   ETAPAS,
@@ -121,6 +131,25 @@ function Dashboard() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  // Validação de cadastro (NUP, OM, portaria, prazo) antes de salvar — ver validacao.ts.
+  // Só bloqueia nos itens de CAMPOS_BLOQUEANTES; o resto (hoje, NUP duplicado) já tem seu
+  // próprio aviso inline mais abaixo e não impede o salvamento.
+  const [pendenciasCadastro, setPendenciasCadastro] = useState<ReturnType<
+    typeof validarCadastro
+  > | null>(null);
+
+  const tentarSalvar = () => {
+    const pendencias = validarCadastro(form, itens);
+    const bloqueios = pendencias.filter(
+      (i) => !i.ok && (CAMPOS_BLOQUEANTES as readonly string[]).includes(i.titulo),
+    );
+    if (bloqueios.length > 0) {
+      setPendenciasCadastro(pendencias.filter((i) => !i.ok));
+      return;
+    }
+    salvar.mutate(form);
+  };
 
   const set = (k: keyof Sindicancia, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -421,7 +450,7 @@ function Dashboard() {
                 </CollapsibleContent>
               </Collapsible>
 
-              <Button onClick={() => salvar.mutate(form)} disabled={salvar.isPending}>
+              <Button onClick={tentarSalvar} disabled={salvar.isPending}>
                 {salvar.isPending ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
@@ -469,11 +498,18 @@ function Dashboard() {
                   </p>
                 </div>
                 {(alerta || vencido) && (
-                  <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
-                    <AlertTriangle className="mb-1 size-4" />
-                    {vencido
-                      ? "Prazo esgotado — se ainda não houve prorrogação, gere e registre o Pedido de Prorrogação de Prazo o quanto antes."
-                      : `Faltam ${restantes} dia(s) para o fim do prazo: avalie gerar o Pedido de Prorrogação de Prazo no módulo Gerador de Peças.`}
+                  <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
+                    <div>
+                      <AlertTriangle className="mb-1 size-4" />
+                      {vencido
+                        ? "Prazo esgotado — se ainda não houve prorrogação, gere e registre o Pedido de Prorrogação de Prazo o quanto antes."
+                        : `Faltam ${restantes} dia(s) para o fim do prazo: avalie gerar o Pedido de Prorrogação de Prazo.`}
+                    </div>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
+                      <Link to="/pecas" search={{ peca: "prorrogacao" }}>
+                        Gerar Pedido de Prorrogação de Prazo
+                      </Link>
+                    </Button>
                   </div>
                 )}
                 <Badge variant="outline">{form.status}</Badge>
@@ -508,6 +544,26 @@ function Dashboard() {
           <PainelSindicados sindicanciaId={selecionada?.id} />
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={pendenciasCadastro !== null}
+        onOpenChange={(aberto) => !aberto && setPendenciasCadastro(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Antes de salvar, confira estes pontos</DialogTitle>
+            <DialogDescription>
+              Alguns campos obrigatórios do cadastro ainda precisam de atenção.
+            </DialogDescription>
+          </DialogHeader>
+          {pendenciasCadastro && <ListaItensValidacao itens={pendenciasCadastro} />}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendenciasCadastro(null)}>
+              Voltar e corrigir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
