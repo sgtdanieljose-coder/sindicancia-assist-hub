@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, ExternalLink, FileUp, History, Loader2, Undo2 } from "lucide-react";
+import { Check, ExternalLink, Eye, FileUp, History, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { desfazerInsercao, listarVersoes } from "@/lib/sindicancias.functions";
+import type { PecaId } from "@/lib/pecas";
+import { PreviewPeca } from "@/components/PreviewPeca";
 import { salvarRascunho, lerRascunho, chaveRascunho } from "@/lib/localStore";
 import { useStatusSincronizacao, useSyncQueue, alvoPeca } from "@/hooks/useSyncQueue";
 import { HistoricoVersoesDialog } from "@/components/HistoricoVersoesDialog";
@@ -248,6 +250,7 @@ export function EditorPeca({
 
   const documentIdAtual = existente?.documentId ?? null;
   const [historicoAberto, setHistoricoAberto] = useState(false);
+  const [previewAberto, setPreviewAberto] = useState(false);
 
   const versoes = useQuery({
     queryKey: ["versoes-peca", sindicanciaId, documentIdAtual],
@@ -330,6 +333,15 @@ export function EditorPeca({
               {listaVersoes.length > 0 ? ` (${listaVersoes.length})` : ""}
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPreviewAberto(true)}
+            disabled={!conteudo.trim()}
+          >
+            <Eye className="size-4" />
+            Pré-visualizar
+          </Button>
           <Button onClick={acionar} disabled={exportando || !conteudo.trim()} size="sm">
             {exportando ? (
               <Loader2 className="size-4 animate-spin" />
@@ -356,6 +368,19 @@ export function EditorPeca({
         }}
         onAtualizado={onExportado}
       />
+
+      <Dialog open={previewAberto} onOpenChange={setPreviewAberto}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Pré-visualização — {titulo}</DialogTitle>
+            <DialogDescription>
+              Aproximação de como a peça vai ficar formatada no Google Docs (EB10-IG-01.001). Ainda
+              não foi exportada — feche e ajuste o texto abaixo se precisar corrigir algo.
+            </DialogDescription>
+          </DialogHeader>
+          <PreviewPeca texto={conteudo} pecaId={pecaId as PecaId | undefined} />
+        </DialogContent>
+      </Dialog>
 
       {ultimaInsercao && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
